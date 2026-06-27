@@ -1,0 +1,17 @@
+
+// Created by torq on 6/20/26.
+//configuration file
+
+#ifndef SAECTUBE_CONFIG_H
+#define SAECTUBE_CONFIG_H
+
+#define SAMPLE_RATE 44100
+#define FRAMES_PER_BUFFER 256
+#define NUM_CHANNELS 1
+#define RING_BUFFER_SECONDS 2
+#define RING_BUFFER_SIZE (SAMPLE_RATE * RING_BUFFER_SECONDS)
+
+#define FFT_SIZE 1024
+#define PLOT_POINTS 512
+
+#endif //SAECTUBE_CONFIG_H
