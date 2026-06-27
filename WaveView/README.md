@@ -63,7 +63,7 @@ It is designed as the software frontend for the acoustic impedance tube project,
    sudo apt install cmake gcc libportaudio2 portaudio19-dev libgtk-4-dev libcairo2-dev
 2. **clone the repo**
    ```bash
-   git clone https://github.com/SAEC-Labs/ImpedanceTube/WaveView.git
+   git clone https://github.com/SAEC-Labs/ImpedanceTube.git
    cd WaveView
 3. **buid with Cmake**
    ```bash
@@ -85,9 +85,9 @@ This method builds a native Windows executable inside the MSYS2 UCRT64 environme
           mingw-w64-ucrt-x86_64-make
 3. **clone and build**
    ```bash
-   git clone https://github.com/SAEC-Labs/ImpedanceTube/WaveView.git
-   cd SAECtube
-   mkdir build && cd build
+   git clone https://github.com/SAEC-Labs/ImpedanceTube.git
+   chdir WaveView
+   mkdir build && chdir build
    cmake .. -G "MinGW Makefiles"
    make -j$(nproc)
 4. **Run the `.exe` file
