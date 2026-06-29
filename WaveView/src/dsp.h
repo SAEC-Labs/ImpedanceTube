@@ -9,8 +9,8 @@
  * using the KissFFT library. Designed for real-time audio analysis.
  */
 
-#ifndef SAECTUBE_DSP_H
-#define SAECTUBE_DSP_H
+#ifndef WAVEVIEW_DSP_H
+#define WAVEVIEW_DSP_H
 
 #include <stdint.h>
 
@@ -34,4 +34,4 @@ void compute_spectrum(const float *time_data, float *magnitude, int fft_size);
  */
 void apply_hann_window(float *data, int n);
 
-#endif //SAECTUBE_DSP_H
+#endif //WAVEVIEW_DSP_H

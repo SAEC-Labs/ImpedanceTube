@@ -6,8 +6,8 @@
  * Audio capture interface, using the built-in mic, using PortAudio. samples are delivered via a callback and
  * written to the thread safe ring buffer
  */
-#ifndef SAECTUBE_AUDIO_H
-#define SAECTUBE_AUDIO_H
+#ifndef WAVEVIEW_AUDIO_H
+#define WAVEVIEW_AUDIO_H
 
 #include "ring_buffer.h"
 
@@ -54,4 +54,4 @@ const char* audio_get_device_name(void);
  */
 void audio_terminate(void);
 
-#endif //SAECTUBE_AUDIO_H
+#endif //WAVEVIEW_AUDIO_H
