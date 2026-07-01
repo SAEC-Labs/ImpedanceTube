@@ -1,0 +1,16 @@
+[project]
+name = "serial-monitor"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "matplotlib>=3.11.0",
+    "numpy>=2.4.6",
+    "pandas>=3.0.3",
+    "pyaudio>=0.2.14",
+    "pyqt6>=6.11.0",
+    "pyqtgraph>=0.14.0",
+    "pyserial>=3.5",
+    "seaborn>=0.13.2",
+]
