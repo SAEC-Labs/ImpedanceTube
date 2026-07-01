@@ -27,5 +27,4 @@ Each transmitted frame consists of 4 bytes to ensure the receiving dashboard can
 ## Future Development
 The project is currently configured for a single-microphone test setup. Future iterations will expand the ADC configuration to use Scan Mode and DMA to support all 4 microphones required for the complete acoustic impedance tube array.
 
-## Author
-**Ronald Mutua Mwau**
+
