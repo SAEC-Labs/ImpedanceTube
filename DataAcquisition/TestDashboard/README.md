@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src/SAEC_logo.png" alt="SAEC Logo" width="350"/>
+  <img src="src/SAEC_logo-white.png" alt="SAEC Logo" width="350"/>
 </p>
 
 # SAEC Acoustic Impedance Tube - Data Acquisition Dashboard
