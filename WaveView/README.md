@@ -14,6 +14,8 @@ It is designed as the software frontend for the acoustic impedance tube project,
 - 🔄 Thread‑safe, lock‑free ring buffer for sample transfer
 - 🧩 Modular C architecture (audio, DSP, GUI, ring buffer)
 - 🐧 Works on Linux (ALSA) and Windows (ASIO/WASAPI)
+  <img width="848" height="621" alt="waveview" src="https://github.com/user-attachments/assets/1fcc6e7d-6564-4ac0-bd56-798f0602ce89" />
+
 ## Planned Features
 
 ### 🖥️ GUI Enhancements
@@ -90,7 +92,7 @@ This method builds a native Windows executable inside the MSYS2 UCRT64 environme
    mkdir build && chdir build
    cmake .. -G "MinGW Makefiles"
    make -j$(nproc)
-4. **Run the `.exe` file
+4. **Run the `.exe` file**
 
 ## Usage
 1. Plug in a microphone (or use the built‑in one).
