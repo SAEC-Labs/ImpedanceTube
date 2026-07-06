@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+    <requires lib="gtk" version="4.0"/>
+
+    <object class="GtkApplicationWindow" id="main_window">
+        <property name="title">WaveView – Real-time Microphone Input</property>
+        <property name="default-width">900</property>
+        <property name="default-height">700</property>
+        <property name="resizable">True</property>
+        <child>
+            <object class="GtkBox" id="main_vbox">
+                <property name="orientation">vertical</property>
+                <property name="spacing">5</property>
+                <property name="margin-start">5</property>
+                <property name="margin-end">5</property>
+                <property name="margin-top">5</property>
+                <property name="margin-bottom">5</property>
+
+                <!-- Control Bar -->
+                <child>
+                    <object class="GtkBox" id="control_box">
+                        <property name="orientation">horizontal</property>
+                        <property name="spacing">10</property>
+                        <property name="halign">fill</property>
+
+                        <!-- Device Label -->
+                        <child>
+                            <object class="GtkLabel" id="device_label">
+                                <property name="label">Device:</property>
+                            </object>
+                        </child>
+
+                        <!-- Device Combo Box -->
+                        <child>
+                            <object class="GtkComboBoxText" id="device_combo">
+                                <property name="hexpand">True</property>
+                            </object>
+                        </child>
+
+                        <!-- Start/Stop Button -->
+                        <child>
+                            <object class="GtkToggleButton" id="start_stop_button">
+                                <property name="label">Start</property>
+                                <property name="hexpand">False</property>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+
+                <!-- Title Label -->
+                <child>
+                    <object class="GtkLabel" id="title_label">
+                        <property name="label">🎤 Live Microphone Input</property>
+                        <property name="halign">center</property>
+                        <property name="vexpand">False</property>
+                    </object>
+                </child>
+
+                <!-- Waveform Drawing Area -->
+                <child>
+                    <object class="GtkDrawingArea" id="waveform_area">
+                        <property name="hexpand">True</property>
+                        <property name="vexpand">True</property>
+                        <property name="height-request">250</property>
+                    </object>
+                </child>
+
+                <!-- Spectrum Drawing Area -->
+                <child>
+                    <object class="GtkDrawingArea" id="spectrum_area">
+                        <property name="hexpand">True</property>
+                        <property name="vexpand">True</property>
+                        <property name="height-request">250</property>
+                    </object>
+                </child>
+
+                <!-- Separator -->
+                <child>
+                    <object class="GtkSeparator" id="separator">
+                        <property name="orientation">horizontal</property>
+                    </object>
+                </child>
+
+                <!-- Status Label -->
+                <child>
+                    <object class="GtkLabel" id="status_label">
+                        <property name="label">Initializing...</property>
+                        <property name="halign">start</property>
+                        <property name="margin-start">5</property>
+                        <property name="margin-end">5</property>
+                        <property name="margin-top">3</property>
+                        <property name="margin-bottom">3</property>
+                    </object>
+                </child>
+            </object>
+        </child>
+    </object>
+</interface>

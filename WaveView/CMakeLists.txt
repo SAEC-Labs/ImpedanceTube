@@ -44,6 +44,8 @@ target_include_directories(WaveView PRIVATE
         ${PORTAUDIO_INCLUDE_DIRS}
         src
         src/external/kissfft
+        #${CMAKE_CURRENT_SOURCE_DIR}
+        #${CMAKE_CURRENT_BINARY_DIR}   # so the UI file is found
 )
 
 # Apply compiler flags
@@ -52,3 +54,7 @@ target_compile_options(WaveView PRIVATE
         ${CAIRO_CFLAGS_OTHER}
         ${PORTAUDIO_CFLAGS_OTHER}
 )
+
+# Copy UI file to build directory (so executable can find it)
+#file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/src/ui DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+
