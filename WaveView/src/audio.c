@@ -231,7 +231,7 @@ int audio_select_device(int device_index) {
     //close old stream
     if (stream) {
         Pa_CloseStream(stream);
-        stream == NULL;
+        stream = NULL;
     }
 
     //update current device
