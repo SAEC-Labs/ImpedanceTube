@@ -6,10 +6,19 @@
  * Audio capture interface, using the built-in mic, using PortAudio. samples are delivered via a callback and
  * written to the thread safe ring buffer
  */
-#ifndef SAECTUBE_AUDIO_H
-#define SAECTUBE_AUDIO_H
+#ifndef WAVEVIEW_AUDIO_H
+#define WAVEVIEW_AUDIO_H
 
 #include "ring_buffer.h"
+
+/**
+ * Device information structure
+ */
+typedef struct {
+    int index;
+    char name[256];
+    int maxInputChannels;
+} AudioDeviceInfo;
 
 /**
  * Initialize the audio capture subsystem.
@@ -19,6 +28,28 @@
  * @return    0 on success, -1 on failure.
  */
 int audio_init(RingBuffer *rb);
+
+/**
+ * Get number of available input devices
+ * @return number of devices, or -1 if not initialized
+ */
+int audio_get_device_count(void);
+
+/**
+ * Get device information for a specific device index.
+ * @param index  Device index (0 to audio_get_device_count()-1)
+ * @return       Pointer to AudioDeviceInfo, or NULL if invalid
+ */
+const AudioDeviceInfo* audio_get_device_info(int index);
+
+/**
+ * Select an input device by its PortAudio device index.
+ * The stream will be stopped, the device changed, and the stream restarted
+ * if it was running.
+ * @param device_index  PortAudio device index (from AudioDeviceInfo.index)
+ * @return              0 on success, -1 on failure
+ */
+int audio_select_device(int device_index);
 
 /**
  * Start audio capture.
@@ -38,6 +69,12 @@ int audio_start(void);
 int audio_stop(void);
 
 /**
+ * Check if the audio stream is currently running.
+ * @return 1 if running, 0 if stopped, -1 on error
+ */
+int audio_is_running(void);
+
+/**
  * Get the name of the audio device being used.
  *
  * @return Pointer to a static string containing the device name,
@@ -54,4 +91,4 @@ const char* audio_get_device_name(void);
  */
 void audio_terminate(void);
 
-#endif //SAECTUBE_AUDIO_H
+#endif //WAVEVIEW_AUDIO_H

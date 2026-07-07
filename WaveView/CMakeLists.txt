@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 4.2)
-project(SAECtube C)
+project(WaveView C)
 
 set(CMAKE_C_STANDARD 11)
 
@@ -13,7 +13,7 @@ pkg_check_modules(GTK4 REQUIRED gtk4)
 pkg_check_modules(CAIRO REQUIRED cairo)
 pkg_check_modules(PORTAUDIO REQUIRED portaudio-2.0)
 
-add_executable(SAECtube main.c
+add_executable(WaveView main.c
         src/config.h
         src/ring_buffer.h
         src/ring_buffer.c
@@ -30,7 +30,7 @@ add_executable(SAECtube main.c
 )
 
 # Link the libs
-target_link_libraries(SAECtube
+target_link_libraries(WaveView
         ${GTK4_LIBRARIES}
         ${CAIRO_LIBRARIES}
         ${PORTAUDIO_LIBRARIES}
@@ -38,17 +38,23 @@ target_link_libraries(SAECtube
 )
 
 # Include the header directories
-target_include_directories(SAECtube PRIVATE
+target_include_directories(WaveView PRIVATE
         ${GTK4_INCLUDE_DIRS}
         ${CAIRO_INCLUDE_DIRS}
         ${PORTAUDIO_INCLUDE_DIRS}
         src
         src/external/kissfft
+        #${CMAKE_CURRENT_SOURCE_DIR}
+        #${CMAKE_CURRENT_BINARY_DIR}   # so the UI file is found
 )
 
 # Apply compiler flags
-target_compile_options(SAECtube PRIVATE
+target_compile_options(WaveView PRIVATE
         ${GTK4_CFLAGS_OTHER}
         ${CAIRO_CFLAGS_OTHER}
         ${PORTAUDIO_CFLAGS_OTHER}
 )
+
+# Copy UI file to build directory (so executable can find it)
+#file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/src/ui DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+
