@@ -14,16 +14,15 @@ It is designed as the software frontend for the acoustic impedance tube project,
 - 🔄 Thread‑safe, lock‑free ring buffer for sample transfer
 - 🧩 Modular C architecture (audio, DSP, GUI, ring buffer)
 - 🐧 Works on Linux (ALSA) and Windows (ASIO/WASAPI)
-  <img width="848" height="621" alt="waveview" src="https://github.com/user-attachments/assets/1fcc6e7d-6564-4ac0-bd56-798f0602ce89" />
-
+- 🖲️ Start/Stop stream control
+- 📟️ Device selection to choose input device from dropdown
+  
 ## Planned Features
 
 ### 🖥️ GUI Enhancements
 
-- **Start/Stop controls** – manual acquisition control
-- **Device selection** – choose input device from a dropdown
-- **Excitation signal generator** – sine, sweep, white noise with frequency range sliders
-- **Multi‑tab display** – separate tabs for waveform, spectrum, transfer function, absorption coefficient
+- **Excitation signal generator** – sine, sweep, white noise, pink noise with frequency range and amplitude sliders.
+- **Multi‑tab display** – separate tabs for waveform, spectrum, transfer function, absorption coefficient plots.
 - **Peak frequency marker** – click‑to‑measure dominant frequency
 - **Data logging** – save raw WAV files, CSV with timestamps, and JSON metadata (sample info, environment)
 - **Export plots** – save waveform/spectrum as PNG
@@ -31,7 +30,7 @@ It is designed as the software frontend for the acoustic impedance tube project,
 
 ### 📊 Heavy DSP Backend
 
-- **Two‑channel (stereo) processing** – for two‑microphone transfer‑function method
+- **Two‑channel (stereo) and four channel processing**
 - **Cross‑spectrum & auto‑spectrum** – `S12`, `S11`, `S22` with averaging
 - **Transfer function** – `H12 = S12 / S11`
 - **Reflection coefficient** – `R` (complex)
@@ -96,8 +95,8 @@ This method builds a native Windows executable inside the MSYS2 UCRT64 environme
 
 ## Usage
 1. Plug in a microphone (or use the built‑in one).
-2.Launch the application.
-3. Speak, whistle, or make noise – the waveform and spectrum update live.
+2. Launch the software, preferrably via terminal to see stdout and stderr. Click the Start/Stop button
+3. Speak, whistle, or make noise – the waveform and FFT spectrum update live.
 4. Close the window or press Ctrl+C to exit.
 
 ## Authors & Credits
