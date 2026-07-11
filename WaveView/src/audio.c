@@ -7,7 +7,9 @@
 #include <portaudio.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <string.h>
+#include <pthread.h> //for the mutex
 
 //static ( private to this file )
 
@@ -19,10 +21,25 @@ static AudioDeviceInfo device_list[MAX_DEVICES];
 static int device_count = 0;
 static int current_device_index = -1; //index into device_list
 static int is_running = 0;
-static char device_name[256] = "Unknown";
+//static char device_name[256] = "Unknown";
+
+/* signal params and protection mutex */
+static SignalParams current_params = {
+    .signal_type = 0,
+    .frequency = 440.0f,
+    .frequency_end = 1000.0f,
+    .amplitude = 0.5f,
+    .sweep_duration = 5.0f,
+    .is_active = 1 //change to 1 for testing
+};
+
+static pthread_mutex_t params_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/* placeholher for signal generator */
+static float generate_signal_sample(const SignalParams *params, unsigned long sample_index, float sample_rate);
 
 /**
-* PortAudio callback function. Audio callback runs in high-priority portaudio thread
+* PortAudio callback function. Audio callback runs in high-priority portaudio thread. FULL-DUPLEX
 *
 * Called automatically by PortAudio when audio data is available.
 *
@@ -39,14 +56,16 @@ static int audio_callback(const void *input, void *output, unsigned long frameCo
     const PaStreamCallbackTimeInfo* timeInfo, PaStreamCallbackFlags statusFlags, void *userData) {
 
     //ignore unused params
-    (void) output;
+    //(void) output;
     (void) timeInfo;
     (void) statusFlags;
 
     //cast data passed through stream to our struct
     RingBuffer *rb = (RingBuffer *) userData;
 
-    //if input is NULL (maybe some audio device issue) do nothing
+    float *out = (float*) output;
+
+    /*if input is NULL (maybe some audio device issue) do nothing
     if (input == NULL) {
         return paContinue;
     }
@@ -57,8 +76,35 @@ static int audio_callback(const void *input, void *output, unsigned long frameCo
     //write samples to ring buffer
     ring_buffer_write(rb, samples, (int) frameCount);
 
-    return paContinue;
+    return paContinue; */
 
+    /* 1. process input */
+    if (input != NULL) {
+        ring_buffer_write(rb, (const float*) input, (int) frameCount);
+    }
+
+    /* 2. generate output */
+    if (out != NULL) {
+        //copy current signal params under mutex - quick lock
+        SignalParams local_params;
+        pthread_mutex_lock(&params_mutex);
+        local_params = current_params;
+        pthread_mutex_unlock(&params_mutex);
+
+        if (local_params.is_active) {
+            //generate samples using the signal generator
+            for (unsigned long i = 0; i < frameCount; i++) {
+                unsigned long sample_index = (unsigned long) Pa_GetStreamTime(stream) * SAMPLE_RATE + 1;
+                out[i] = generate_signal_sample(&local_params, sample_index, SAMPLE_RATE);
+            }
+        } else {
+            //output silence
+            for (unsigned long i = 0; i < frameCount; i++) {
+                out[i] = 0.0f;
+            }
+        }
+    }
+    return paContinue;
 }
 
 /**
@@ -104,33 +150,58 @@ static int find_default_device_index(void) {
 }
 
 /**
+ *Stream opening, FULL-DUPLEX
  *function to open the stream with the current device.
  */
 static int open_stream(void) {
     PaError err;
-    PaStreamParameters inputParams;
+    PaStreamParameters inputParams, outputParams;
 
     if (current_device_index < 0 || current_device_index >=device_count) {
-        fprintf(stderr, "audio stream: Invalid device index.\n");
+        fprintf(stderr, "audio: No valid device selected\n");
         return -1;
     }
 
-    int pa_device = device_list[current_device_index].index;
-    const PaDeviceInfo *info = Pa_GetDeviceInfo(pa_device);
-    if (info == NULL) {
-        fprintf(stderr, "audio: Failed to get device info for index %d.\n", pa_device);
+    int in_dev = device_list[current_device_index].index;
+    const PaDeviceInfo *in_info = Pa_GetDeviceInfo(in_dev);
+
+   //int pa_device = device_list[current_device_index].index;
+    //const PaDeviceInfo *info = Pa_GetDeviceInfo(pa_device);
+    if (in_info == NULL) {
+        fprintf(stderr, "audio: Failed to get input device info.\n");
         return -1;
     }
 
-    inputParams.device = pa_device;
+    //input params (mic)
+    inputParams.device = in_dev;
     inputParams.channelCount = 1; //mono for now
     inputParams.sampleFormat = paFloat32;
+    inputParams.suggestedLatency = in_info->defaultLowInputLatency;
     inputParams.hostApiSpecificStreamInfo = NULL;
 
+    //output params (speaker)
+    PaDeviceIndex out_dev = Pa_GetDefaultOutputDevice();
+    if (out_dev == paNoDevice) {
+        fprintf(stderr, "audio: No default output device found.\n");
+        return -1;
+    }
+    const PaDeviceInfo *out_info = Pa_GetDeviceInfo(out_dev);
+    if (out_info == NULL) {
+        fprintf(stderr, "audio: Failed to get output device info.\n");
+        return -1;
+    }
+
+    outputParams.device = out_dev;
+    outputParams.channelCount = 1; //mono output
+    outputParams.sampleFormat = paFloat32;
+    outputParams.suggestedLatency = out_info->defaultLowOutputLatency;
+    outputParams.hostApiSpecificStreamInfo = NULL;
+
+    //open full-duplex stream
     err = Pa_OpenStream(
         &stream,
         &inputParams,
-        NULL,
+        &outputParams,
         SAMPLE_RATE,
         FRAMES_PER_BUFFER,
         paClipOff,
@@ -143,14 +214,15 @@ static int open_stream(void) {
         return -1;
     }
 
-    printf("audio: Stream opened on device: %s\n", info->name);
+    printf("audio: Full-duplex stream opened on devices: input=%s, output=%s\n", in_info->name, out_info->name);
     return 0;
 }
 
+
 int audio_init(RingBuffer *rb) {
     PaError err;
-    PaDeviceIndex device_index;
-    const PaDeviceInfo *device_info;
+    //PaDeviceIndex device_index;
+    //const PaDeviceInfo *device_info;
 
     //validate input
     if (rb == NULL) {
@@ -190,7 +262,27 @@ int audio_init(RingBuffer *rb) {
         return -1;
     }
 
-    printf("audio_init: Initialized with device: %s\n", device_list[current_device_index].name);
+    printf("audio_init: Initialized with input device: %s\n", device_list[current_device_index].name);
+    return 0;
+}
+
+int audio_update_signal_params(const SignalParams *params) {
+    if (params == NULL) return -1;
+
+    pthread_mutex_lock(&params_mutex);
+    current_params = *params;
+    pthread_mutex_unlock(&params_mutex);
+
+    return 0;
+}
+
+int audio_get_signal_params(SignalParams *params) {
+    if (params == NULL) return -1;
+
+    pthread_mutex_lock(&params_mutex);
+    *params = current_params;
+    pthread_mutex_unlock(&params_mutex);
+
     return 0;
 }
 
@@ -322,3 +414,17 @@ void audio_terminate(void) {
     printf("audio: PortAudio terminated.\n");
 }
 
+//signal generator, will be replaced by real implementation from signals/
+static float generate_signal_sample(const SignalParams *params, unsigned long sample_index, float sample_rate) {
+
+    /* Stub implementation – just returns a sine wave for testing */
+    /*  this will be moved to a proper module */
+    if (!params->is_active) return 0.0f;
+
+    float freq = params->frequency;
+    float amp = params->amplitude;
+
+    /* Simple sine wave */
+    float phase = 2.0f * 3.141592653589793f * freq * sample_index / sample_rate;
+    return amp * sinf(phase);
+}
