@@ -10,20 +10,9 @@
 #define WAVEVIEW_AUDIO_H
 
 #include "ring_buffer.h"
+#include "signals/signals.h"
+//#include <stdint.h>
 
-/**
- * Signal parameters structure – passed from GUI to audio thread.
- * All fields are protected by a mutex when updated from GUI.
- */
-typedef struct {
-    int signal_type; //0=sine, 1=sweep, 2=white noise, 3=pink noise, 4=brown noise
-    float frequency; //for sine, or start for sweep
-    float frequency_end; //for sweep only
-    float amplitude;
-    float sweep_duration;
-    int is_active;
-
-} SignalParams;
 
 /**
  * Device information structure

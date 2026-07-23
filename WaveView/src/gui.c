@@ -39,8 +39,7 @@ typedef struct {
 } GUIState;
 
 //drawing callbacks, gtk4 styles
-static void on_draw_waveform(GtkDrawingArea *area, cairo_t *cr,
-                             int width, int height, gpointer user_data)
+static void on_draw_waveform(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data)
 {
     GUIState *state = (GUIState*) user_data;
     cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
@@ -64,8 +63,7 @@ static void on_draw_waveform(GtkDrawingArea *area, cairo_t *cr,
     cairo_stroke(cr);
 }
 
-static void on_draw_spectrum(GtkDrawingArea *area, cairo_t *cr,
-                             int width, int height, gpointer user_data)
+static void on_draw_spectrum(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data)
 {
     GUIState *state = (GUIState*) user_data;
     cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);

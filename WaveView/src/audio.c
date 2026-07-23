@@ -7,9 +7,12 @@
 #include <portaudio.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <math.h>
 #include <string.h>
-#include <pthread.h> //for the mutex
+#include <pthread.h>
+#include "signals/sine_wave.h"
+#include "signals/linear_sweep.h"
+
+
 
 //static ( private to this file )
 
@@ -25,7 +28,7 @@ static int is_running = 0;
 
 /* signal params and protection mutex */
 static SignalParams current_params = {
-    .signal_type = 0,
+    .type = SIGNAL_SINE,
     .frequency = 440.0f,
     .frequency_end = 1000.0f,
     .amplitude = 0.5f,
@@ -35,8 +38,21 @@ static SignalParams current_params = {
 
 static pthread_mutex_t params_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-/* placeholher for signal generator */
-static float generate_signal_sample(const SignalParams *params, unsigned long sample_index, float sample_rate);
+/* signal generator */
+static float generate_signal_sample(const SignalParams *params, uint64_t sample_index) {
+    if (!params->is_active) {
+        return 0.0f;
+    }
+
+    switch (params->type) {
+        case SIGNAL_SINE:
+            return sine_generate_sample(sample_index);
+        case SIGNAL_LINEAR_SWEEP:
+            return linear_sweep_generate_sample(sample_index);
+        default:
+            return 0.0f; //other types not yet implemented
+    }
+}
 
 /**
 * PortAudio callback function. Audio callback runs in high-priority portaudio thread. FULL-DUPLEX
@@ -63,7 +79,7 @@ static int audio_callback(const void *input, void *output, unsigned long frameCo
     //cast data passed through stream to our struct
     RingBuffer *rb = (RingBuffer *) userData;
 
-    float *out = (float*) output;
+    float *out = output;
 
     /*if input is NULL (maybe some audio device issue) do nothing
     if (input == NULL) {
@@ -91,11 +107,16 @@ static int audio_callback(const void *input, void *output, unsigned long frameCo
         local_params = current_params;
         pthread_mutex_unlock(&params_mutex);
 
+        //get current sample index for sweep timing
+        static uint64_t sample_counter = 0;
+        uint64_t sample_index = sample_counter;
+        sample_counter += frameCount;
+
         if (local_params.is_active) {
             //generate samples using the signal generator
             for (unsigned long i = 0; i < frameCount; i++) {
-                unsigned long sample_index = (unsigned long) Pa_GetStreamTime(stream) * SAMPLE_RATE + 1;
-                out[i] = generate_signal_sample(&local_params, sample_index, SAMPLE_RATE);
+               // unsigned long sample_index = (unsigned long) Pa_GetStreamTime(stream) * SAMPLE_RATE + 1;
+                out[i] = generate_signal_sample(&local_params, sample_index + i);
             }
         } else {
             //output silence
@@ -233,7 +254,7 @@ int audio_init(RingBuffer *rb) {
     //store ring buffer for use in start/stop if needed
     global_rb = rb;
 
-    //ininialize portaudio
+    //initialize portaudio
     err = Pa_Initialize();
     if (err != paNoError) {
         fprintf(stderr, "audio_init: Pa_Initialize failed: %s\n", Pa_GetErrorText(err));
@@ -270,9 +291,27 @@ int audio_update_signal_params(const SignalParams *params) {
     if (params == NULL) return -1;
 
     pthread_mutex_lock(&params_mutex);
-    current_params = *params;
-    pthread_mutex_unlock(&params_mutex);
 
+    //copy params
+    current_params = *params;
+    current_params.sample_rate = SAMPLE_RATE;
+
+    //init the selected signal generator
+    if (current_params.is_active) {
+        switch (current_params.type) {
+            case SIGNAL_SINE:
+                sine_init(&current_params);
+                break;
+            case SIGNAL_LINEAR_SWEEP:
+                linear_sweep_init(&current_params);
+                break;
+            default:
+                //other types: do nothing yet
+                break;
+        }
+    }
+
+    pthread_mutex_unlock(&params_mutex);
     return 0;
 }
 
@@ -327,7 +366,7 @@ int audio_select_device(int device_index) {
     }
 
     //update current device
-    current_device_index == new_list_index;
+    current_device_index = new_list_index;
 
     //reopen stream
     if (open_stream() != 0) {
@@ -347,14 +386,12 @@ int audio_select_device(int device_index) {
 }
 
 int audio_start(void) {
-    PaError err;
-
     if (stream == NULL) {
         fprintf(stderr, "audio_start: stream not initialized. Call audio_init() first.\n");
         return -1;
     }
 
-    err = Pa_StartStream(stream);
+    PaError err = Pa_StartStream(stream);
     if (err != paNoError) {
         fprintf(stderr, "audio_start: Pa_StartStream failed: %s\n", Pa_GetErrorText(err));
         return -1;
@@ -414,17 +451,3 @@ void audio_terminate(void) {
     printf("audio: PortAudio terminated.\n");
 }
 
-//signal generator, will be replaced by real implementation from signals/
-static float generate_signal_sample(const SignalParams *params, unsigned long sample_index, float sample_rate) {
-
-    /* Stub implementation – just returns a sine wave for testing */
-    /*  this will be moved to a proper module */
-    if (!params->is_active) return 0.0f;
-
-    float freq = params->frequency;
-    float amp = params->amplitude;
-
-    /* Simple sine wave */
-    float phase = 2.0f * 3.141592653589793f * freq * sample_index / sample_rate;
-    return amp * sinf(phase);
-}
