@@ -13,7 +13,7 @@
 #include <cairo.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
+//#include <math.h>
 
 //GUI state struct
 typedef struct {
@@ -23,6 +23,8 @@ typedef struct {
     GtkWidget *spectrum_area;
     GtkWidget *status_label;
     GtkWidget *device_combo;
+    GtkWidget *signal_type_combo;
+    GtkWidget *generate_button;
     GtkWidget *start_stop_button;
     GtkBuilder *builder;
     RingBuffer *rb;
@@ -36,7 +38,106 @@ typedef struct {
 
     //Stream stat
     int is_streaming;
+
+    //signal params
+    SignalParams signal_params;
 } GUIState;
+
+//update dialog labels and visibility based on signal type
+static void update_dialog_visibility(GUIState *state) {
+    guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(state->signal_type_combo));
+    const char *type_names[] = {
+        "Sine Wave",
+        "Linear Sweep",
+        "Log Sweep (Future)",
+        "White Noise (Future)",
+        "Pink Noise (Future)",
+        "Brownian Noise (Future)"
+    };
+
+    GtkWidget *label = GTK_WIDGET(gtk_builder_get_object(state->builder, "dialog_signal_type_label"));
+
+    char markup[256];
+    snprintf(markup, sizeof(markup), "Signal Type: <span weight=\"bold\">%s</span>", type_names[selected]);
+
+    gtk_label_set_markup(GTK_LABEL(label), markup);
+
+    //show/hide params boxes
+    GtkWidget *sine_box = GTK_WIDGET(gtk_builder_get_object(state->builder, "sine_params_box"));
+    GtkWidget *sweep_box = GTK_WIDGET(gtk_builder_get_object(state->builder, "sweep_params_box"));
+    GtkWidget *future_box = GTK_WIDGET(gtk_builder_get_object(state->builder, "future_params_box"));
+
+    gtk_widget_set_visible(sine_box, (selected == 0));
+    gtk_widget_set_visible(sweep_box, (selected == 1));
+    gtk_widget_set_visible(future_box, (selected >= 2));
+}
+
+static void show_signal_dialog(GUIState *state) {
+    GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(state->builder, "signal_params_dialog"));
+    update_dialog_visibility(state);
+
+    gtk_window_present(GTK_WINDOW(dialog));
+}
+
+static void on_dialog_generate(GtkButton *button, gpointer user_data) {
+    GUIState *state = (GUIState*) user_data;
+    GtkBuilder *builder = state->builder;
+    guint signal_type = gtk_drop_down_get_selected(GTK_DROP_DOWN(state->signal_type_combo));
+
+    //update SignalParams based on signal type
+    state->signal_params.type = (SignalType) signal_type;
+    state->signal_params.is_active = 1;
+
+    switch (signal_type) {
+        case SIGNAL_SINE: {
+            GtkSpinButton *freq_spin = GTK_SPIN_BUTTON(gtk_builder_get_object(builder, "sine_freq_spin"));
+            GtkScale *amp_scale = GTK_SCALE(gtk_builder_get_object(builder, "sine_amp_scale"));
+
+            state->signal_params.frequency = gtk_spin_button_get_value(freq_spin);
+            state->signal_params.amplitude = gtk_range_get_value(GTK_RANGE(amp_scale));
+            break;
+        }
+        case SIGNAL_LINEAR_SWEEP: {
+            GtkSpinButton *start_spin = GTK_SPIN_BUTTON(gtk_builder_get_object(builder, "sweep_start_spin"));
+            GtkSpinButton *end_spin = GTK_SPIN_BUTTON(gtk_builder_get_object(builder, "sweep_end_spin"));
+            GtkSpinButton *duration_spin = GTK_SPIN_BUTTON(gtk_builder_get_object(builder, "sweep_duration_spin"));
+            GtkScale *amp_scale = GTK_SCALE(gtk_builder_get_object(builder, "sweep_amp_scale"));
+
+            state->signal_params.frequency = gtk_spin_button_get_value(start_spin);
+            state->signal_params.frequency_end = gtk_spin_button_get_value(end_spin);
+            state->signal_params.sweep_duration = gtk_spin_button_get_value(duration_spin);
+            state->signal_params.amplitude = gtk_range_get_value(GTK_RANGE(amp_scale));
+            break;
+        } default:
+            state->signal_params.is_active = 0;
+            break;
+    }
+
+    //apply to audio subsystem
+    audio_update_signal_params(&state->signal_params);
+
+    //update status
+    const char *type_names[] = {
+        "Sine", "Linear Sweep", "Log Sweep", "White Noise", "Pink Noise", "Brownian Noise"
+    };
+    char status[256];
+    snprintf(status, sizeof(status), "Device: %s | Signal: %s | Rate: %d Hz | %s", audio_get_device_name(), type_names[signal_type], SAMPLE_RATE, state->is_streaming ? "Running" : "Stopped");
+
+    gtk_label_set_text(GTK_LABEL(state->status_label), status);
+
+    //close dialog
+    GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(builder, "signal_params_dialog"));
+    gtk_window_destroy(GTK_WINDOW(dialog));
+}
+
+static void on_dialog_cancel(GtkButton *button, gpointer user_data) {
+    GUIState *state = (GUIState*) user_data;
+    GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(state->builder, "signal_params_dialog"));
+
+    gtk_window_destroy(GTK_WINDOW(dialog));
+}
+
+
 
 //drawing callbacks, gtk4 styles
 static void on_draw_waveform(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data)
@@ -199,6 +300,11 @@ static void on_window_closed(GtkWindow *window, gpointer user_data)
     g_application_quit(G_APPLICATION(gtk_window_get_application(window)));
 }
 
+static void on_generate_button_clicked(GtkButton *button, gpointer user_data) {
+    GUIState *state = (GUIState*) user_data;
+    show_signal_dialog(state);
+}
+
 //device combo box
 static void populate_device_combo(GUIState *state)
 {
@@ -230,6 +336,35 @@ static void populate_device_combo(GUIState *state)
     g_object_unref(string_list);
 }
 
+static void populate_signal_type_combo(GUIState *state) {
+    GtkStringList *string_list = gtk_string_list_new(NULL);
+    const char *signal_names[] = {
+        "Sine Wave",
+        "Linear Sweep",
+        "Log Sweep (Future)",
+        "White Noise (Future)",
+        "Pink Noise (Future)",
+        "Brownian Noise (Future)"
+    };
+
+    for (size_t i = 0; i < G_N_ELEMENTS(signal_names); i++) {
+        gtk_string_list_append(string_list, signal_names[i]);
+    }
+
+    GtkWidget *drop_down = gtk_drop_down_new(G_LIST_MODEL(string_list), NULL);
+    GtkWidget *parent = gtk_widget_get_parent(state->signal_type_combo);
+
+    if (parent) {
+        gtk_box_remove(GTK_BOX(parent), state->signal_type_combo);
+        gtk_box_append(GTK_BOX(parent), drop_down);
+        gtk_widget_set_hexpand(drop_down, TRUE);
+        state->signal_type_combo = drop_down;
+        //No signal connection needed, we read the value when generating
+    }
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(state->signal_type_combo), 0);
+    g_object_unref(string_list);
+}
+
 //setup draw funcs and signal handlers
 static void setup_callbacks(GUIState *state)
 {
@@ -242,6 +377,9 @@ static void setup_callbacks(GUIState *state)
 
     //Start/Stop button
     g_signal_connect(state->start_stop_button, "toggled", G_CALLBACK(on_start_stop_toggled), state);
+
+    //generate button
+    g_signal_connect(state->generate_button, "clicked", G_CALLBACK(on_generate_button_clicked), state);
 
     //Window close
     g_signal_connect(state->window, "close-request", G_CALLBACK(on_window_closed), state);
@@ -273,6 +411,8 @@ static void app_activate(GtkApplication *app, gpointer user_data)
     state->waveform_area = GTK_WIDGET(gtk_builder_get_object(builder, "waveform_area"));
     state->spectrum_area = GTK_WIDGET(gtk_builder_get_object(builder, "spectrum_area"));
     state->device_combo = GTK_WIDGET(gtk_builder_get_object(builder, "device_combo"));
+    state->signal_type_combo = GTK_WIDGET(gtk_builder_get_object(builder, "signal_type_combo"));
+    state->generate_button = GTK_WIDGET(gtk_builder_get_object(builder, "generate_button"));
     state->start_stop_button = GTK_WIDGET(gtk_builder_get_object(builder, "start_stop_button"));
     state->status_label = GTK_WIDGET(gtk_builder_get_object(builder, "status_label"));
 
@@ -282,7 +422,7 @@ static void app_activate(GtkApplication *app, gpointer user_data)
 
 
     if (!state->window || !state->waveform_area || !state->spectrum_area ||
-        !state->device_combo || !state->start_stop_button || !state->status_label) {
+        !state->device_combo || !state->signal_type_combo || state->generate_button || !state->start_stop_button || !state->status_label) {
         fprintf(stderr, "app_activate: Failed to get all widgets from UI file.\n");
         g_object_unref(builder);
         return;
@@ -291,13 +431,30 @@ static void app_activate(GtkApplication *app, gpointer user_data)
     state->builder = builder;
     g_printerr("DEBUG: All widgets OK\n");
 
+    //connect dialog button signals
+    GtkWidget *dialog_generate = GTK_WIDGET(gtk_builder_get_object(builder, "dialog_generate_button"));
+    GtkWidget *dialog_cancel = GTK_WIDGET(gtk_builder_get_object(builder, "dialog_cancel_button"));
+
+    g_signal_connect(dialog_generate, "clicked", G_CALLBACK(on_dialog_generate), state);
+    g_signal_connect(dialog_cancel, "clicked", G_CALLBACK(on_dialog_cancel), state);
+
     //Populate device list
     populate_device_combo(state);
+    populate_signal_type_combo(state);
     g_printerr("DEBUG: Device combo populated");
 
     //Set up signal handlers and draw functions
     setup_callbacks(state);
     g_printerr("DEBUG: Callbacks set up\n");
+
+    //init signal params
+    state->signal_params.type = SIGNAL_SINE;
+    state->signal_params.frequency = 440.0f;
+    state->signal_params.frequency_end = 1000.0f;
+    state->signal_params.amplitude = 0.5f;
+    state->signal_params.sweep_duration = 5.0f;
+    state->signal_params.is_active = 0;
+    state->signal_params.sample_rate = SAMPLE_RATE;
 
     //Set initial status
     char status[256];
@@ -309,6 +466,7 @@ static void app_activate(GtkApplication *app, gpointer user_data)
     //Show the window
     gtk_window_present(GTK_WINDOW(state->window));
     g_printerr("DEBUG: Window presented\n");
+
 
     //check if window is visible
     gboolean is_visible = gtk_widget_get_visible(state->window);
