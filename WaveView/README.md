@@ -16,12 +16,18 @@ It is designed as the software frontend for the acoustic impedance tube project,
 - 🐧 Works on Linux (ALSA) and Windows (ASIO/WASAPI)
 - 🖲️ Start/Stop stream control
 - 📟️ Device selection to choose input device from dropdown
+- 🔊️ Excitation signal generator with freq range and amplitude sliders: 
+   1. sine wave ☑️
+  2. linear sweep ☑️
+  3. white noise
+  4. pink noise
+  5. brownian noise
+  6. logarithmic sweep
   
 ## Planned Features
 
 ### 🖥️ GUI Enhancements
 
-- **Excitation signal generator** – sine, sweep, white noise, pink noise with frequency range and amplitude sliders.
 - **Multi‑tab display** – separate tabs for waveform, spectrum, transfer function, absorption coefficient plots.
 - **Peak frequency marker** – click‑to‑measure dominant frequency
 - **Data logging** – save raw WAV files, CSV with timestamps, and JSON metadata (sample info, environment)
@@ -41,7 +47,7 @@ It is designed as the software frontend for the acoustic impedance tube project,
 
 ### 🔌 Hardware Integration
 
-- **STM32 USB Audio support** – replace PC microphone with custom DAQ
+- **STM32 USB Audio support** – replace PC microphone with custom STM32 DAQ
 - **Simultaneous 4‑channel capture** – for full four‑microphone transmission loss measurements
 - **Auto‑detection of USB audio interfaces** – plug‑and‑play support
 
@@ -79,15 +85,13 @@ This method builds a native Windows executable inside the MSYS2 UCRT64 environme
 1. **Install MSYS2 from [ https://www.msys2.org/ ] and launch the UCRT64 terminal.**
 2. **Install Dependencies**
    ```bash
-   pacman -S mingw-w64-ucrt-x86_64-cmake \
-          mingw-w64-ucrt-x86_64-gcc \
-          mingw-w64-ucrt-x86_64-portaudio \
-          mingw-w64-ucrt-x86_64-gtk4 \
-          mingw-w64-ucrt-x86_64-make
+   pacman -S git
+   pacman -Syy
+   pacman -S mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-portaudio mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-make git
 3. **clone and build**
    ```bash
    git clone https://github.com/SAEC-Labs/ImpedanceTube.git
-   chdir WaveView
+   chdir ImopedanceTube/WaveView/
    mkdir build && chdir build
    cmake .. -G "MinGW Makefiles"
    make -j$(nproc)
@@ -95,15 +99,17 @@ This method builds a native Windows executable inside the MSYS2 UCRT64 environme
 
 ## Usage
 1. Plug in a microphone (or use the built‑in one).
-2. Launch the software, preferrably via terminal to see stdout and stderr. Click the Start/Stop button
-3. Speak, whistle, or make noise – the waveform and FFT spectrum update live.
-4. Close the window or press Ctrl+C to exit.
+2. Launch the software, preferrably via terminal to see stdout and stderr. Click the Start/Stop button.
+3. Open the signal generator tab to generate a signal, will play on your inbuilt speaker or plugged in headphones.
+4. Speak, whistle, or make noise, the waveform and FFT spectrum update live.
+5. Close the window or press Ctrl+C to exit.
 
 ## Authors & Credits
-1. **SAEC Team** – Mechatronics Engineering students, DeKUT
+1. **SAEC Team** – Bsc. Mechatronics Engineering students, DeKUT
 2. **KissFFT** – Mark Borgerding (public domain / BSD)
 3. **PortAudio** – PortAudio community (MIT)
 4. **GTK** – The GTK team (LGPL)
+5. **JetBrains s.r.o** - For renewing my CLion Student's Licence to use for this dev work!
 
 ## License
 See the `LICENSE` for details
