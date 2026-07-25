@@ -8,7 +8,7 @@
 #include "signals.h"
 
 void sine_init(const SignalParams *params);
-float sine_generate_sample(uint64_t sample_index);
+float sine_wave_generate_sample(uint64_t sample_index);
 void sine_reset(void);
 
 #endif //WAVEVIEW_SINE_WAVE_H

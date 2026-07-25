@@ -46,7 +46,7 @@ static float generate_signal_sample(const SignalParams *params, uint64_t sample_
 
     switch (params->type) {
         case SIGNAL_SINE:
-            return sine_generate_sample(sample_index);
+            return sine_wave_generate_sample(sample_index);
         case SIGNAL_LINEAR_SWEEP:
             return linear_sweep_generate_sample(sample_index);
         default:
