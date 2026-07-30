@@ -65,9 +65,6 @@ static void MX_USART1_UART_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 int isSent = 1;
-uint16_t mic1;
-int adc_conv_cplt = 0;
-
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
   if (huart->Instance == USART1)
@@ -75,10 +72,7 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
     isSent = 1; // Set the flag to indicate that transmission is complete
   }
 }
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
-{
-  adc_conv_cplt = 1; // Set the flag to indicate that ADC conversion is complete
-}
+
 /* USER CODE END 0 */
 
 /**
@@ -119,20 +113,24 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  uint16_t mic_value;
+  // char uart_buf[32];
   uint8_t packet[4];
-  HAL_ADC_Start_DMA(&hadc1, (uint32_t *)&mic1, 1); // Start ADC in DMA mode
   while (1)
   {
-    if (isSent && adc_conv_cplt)
+    if (isSent)
     {
-      isSent = 0;
-      adc_conv_cplt = 0; // Clear the ADC conversion complete flag
-
-      packet[0] = (uint8_t)(mic1 & 0xFF);        // LSB
-      packet[1] = (uint8_t)((mic1 >> 8) & 0xFF); // MSB
-      packet[2] = 0xAA;                          // Start byte
-      packet[3] = 0xBB;                          // End byte
-
+      isSent = 0; // Clear the flag before starting a new transmission
+      HAL_ADC_Start(&hadc1);
+      if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK)
+      {
+        mic_value = (uint16_t)(HAL_ADC_GetValue(&hadc1)); //
+        packet[0] = (uint8_t)(mic_value & 0xFF);          // LSB
+        packet[1] = (uint8_t)((mic_value >> 8) & 0xFF);   // MSB
+        packet[2] = 0xAA;                                 // Start byte
+        packet[3] = 0xBB;                                 // End byte
+      }
+      HAL_ADC_Stop(&hadc1);
       HAL_UART_Transmit_DMA(&huart1, packet, 4);
     }
 
@@ -230,7 +228,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_0;
   sConfig.Rank = 1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_84CYCLES;
+  sConfig.SamplingTime = ADC_SAMPLETIME_15CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
