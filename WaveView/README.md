@@ -19,10 +19,13 @@ It is designed as the software frontend for the acoustic impedance tube project,
 - 🔊️ Excitation signal generator with freq range and amplitude sliders: 
    1. sine wave ☑️
   2. linear sweep ☑️
-  3. white noise
-  4. pink noise
-  5. brownian noise
-  6. logarithmic sweep
+  3. white noise (future)
+  4. pink noise (future)
+  5. brownian noise (future)
+  6. logarithmic sweep (next, because it's awesome 😂️😍️)
+- **Dark/Light theme toggle** – for comfortable viewing (activated based on System setting)
+
+![v0.2.png](v0.2.png)
   
 ## Planned Features
 
@@ -32,11 +35,11 @@ It is designed as the software frontend for the acoustic impedance tube project,
 - **Peak frequency marker** – click‑to‑measure dominant frequency
 - **Data logging** – save raw WAV files, CSV with timestamps, and JSON metadata (sample info, environment)
 - **Export plots** – save waveform/spectrum as PNG
-- **Dark/Light theme toggle** – for comfortable viewing
+
 
 ### 📊 Heavy DSP Backend
 
-- **Two‑channel (stereo) and four channel processing**
+- **Two‑channel (stereo) and four channel input processing**
 - **Cross‑spectrum & auto‑spectrum** – `S12`, `S11`, `S22` with averaging
 - **Transfer function** – `H12 = S12 / S11`
 - **Reflection coefficient** – `R` (complex)
@@ -47,7 +50,7 @@ It is designed as the software frontend for the acoustic impedance tube project,
 
 ### 🔌 Hardware Integration
 
-- **STM32 USB Audio support** – replace PC microphone with custom STM32 DAQ
+- **STM32 USB Audio support** – replace PC mic stream with custom STM32 DAQ streams.
 - **Simultaneous 4‑channel capture** – for full four‑microphone transmission loss measurements
 - **Auto‑detection of USB audio interfaces** – plug‑and‑play support
 
@@ -77,12 +80,14 @@ It is designed as the software frontend for the acoustic impedance tube project,
    mkdir build && cd build
    cmake ..
    make -j$(nproc)
-4. Run the binary
+4. Run the binary.
+
+Note: You can also load the project as a Cmake project in your favorite IDE and build.
 
 ## On Windows - Native build with MSYS2
 This method builds a native Windows executable inside the MSYS2 UCRT64 environment.
 
-1. **Install MSYS2 from [ https://www.msys2.org/ ] and launch the UCRT64 terminal.**
+1. **Install MSYS2 from https://www.msys2.org/ and launch the UCRT64 terminal.**
 2. **Install Dependencies**
    ```bash
    pacman -S git
@@ -98,18 +103,24 @@ This method builds a native Windows executable inside the MSYS2 UCRT64 environme
 4. **Run the `.exe` file**
 
 ## Usage
-1. Plug in a microphone (or use the built‑in one).
+1. Plug in a microphone (or use the built‑in one). Best experience if you have AUX headphones 🎧️
 2. Launch the software, preferrably via terminal to see stdout and stderr. Click the Start/Stop button.
-3. Open the signal generator tab to generate a signal, will play on your inbuilt speaker or plugged in headphones.
-4. Speak, whistle, or make noise, the waveform and FFT spectrum update live.
+3. Open the signal generator dropdown to generate a signal, will play on your inbuilt speaker or plugged in headphones. Adjust amplitude and duration.
+4. Speak, whistle, or make noise, the waveform and FFT spectrum update live as your speaker outputs the generating signal.
 5. Close the window or press Ctrl+C to exit.
 
+## Known Issues
+1. Selecting and working with the hardware device `(hw:*)` on Linux from the dropdown sometimes hangs the stream. 
+   This is a direct driver initialization error and will be fixed. 
+
+**Quick fix**: Make sure to select the `default` device.
+
 ## Authors & Credits
-1. **SAEC Team** – Bsc. Mechatronics Engineering students, DeKUT
+1. **The awesome SAEC Team** – Bsc. Mechatronics Engineering students, DeKUT
 2. **KissFFT** – Mark Borgerding (public domain / BSD)
 3. **PortAudio** – PortAudio community (MIT)
 4. **GTK** – The GTK team (LGPL)
-5. **JetBrains s.r.o** - For renewing my CLion Student's Licence to use for this dev work!
+5. **JetBrains s.r.o** - For renewing my CLion IDE Student's Licence to use for this dev work!
 
 ## License
 See the `LICENSE` for details
