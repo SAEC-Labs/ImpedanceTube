@@ -25,6 +25,7 @@ typedef struct {
     GtkWidget *device_combo;
     GtkWidget *signal_type_combo;
     GtkWidget *generate_button;
+    GtkWidget *cancel_button;
     GtkWidget *start_stop_button;
     GtkBuilder *builder;
     RingBuffer *rb;
@@ -81,11 +82,22 @@ static void update_dialog_visibility(GUIState *state) {
 static void show_signal_dialog(GUIState *state) {
     GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(state->builder, "signal_params_dialog"));
 
+    if (dialog == NULL) {
+        g_printerr("ERROR: dialog is NULL in show_signal_dialog()\n");
+        return;
+    }
+
+
     //set transient parent to prevent focus issues
     gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(state->window));
-    
+
     update_dialog_visibility(state);
-    //gtk_widget_show(dialog);
+
+    //ensure buttons are visible
+    gtk_widget_set_visible(state->generate_button, TRUE);
+    gtk_widget_set_visible(state->cancel_button, TRUE);
+
+    //show dialog
     gtk_widget_set_visible(dialog, TRUE);
     gtk_window_present(GTK_WINDOW(dialog));
 }
@@ -145,7 +157,7 @@ static void on_dialog_generate(GtkButton *button, gpointer user_data) {
 
     gtk_label_set_text(GTK_LABEL(state->status_label), status);
 
-    //hide dialog instead of destrying
+    //hide dialog instead of destroying
     GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(builder, "signal_params_dialog"));
     //gtk_widget_hide(dialog);
     //gtk_window_destroy(GTK_WINDOW(dialog));
@@ -453,17 +465,24 @@ static void app_activate(GtkApplication *app, gpointer user_data)
     state->spectrum_area = GTK_WIDGET(gtk_builder_get_object(builder, "spectrum_area"));
     state->device_combo = GTK_WIDGET(gtk_builder_get_object(builder, "device_combo"));
     state->signal_type_combo = GTK_WIDGET(gtk_builder_get_object(builder, "signal_type_combo"));
-    //state->generate_button = GTK_WIDGET(gtk_builder_get_object(builder, "generate_button"));
     state->start_stop_button = GTK_WIDGET(gtk_builder_get_object(builder, "start_stop_button"));
     state->status_label = GTK_WIDGET(gtk_builder_get_object(builder, "status_label"));
 
+    //get dialog buttons stored in GUIState
+    state->generate_button = GTK_WIDGET(gtk_builder_get_object(builder, "dialog_generate_button"));
+    state->cancel_button = GTK_WIDGET(gtk_builder_get_object(builder, "dialog_cancel_button"));
+
+    //dialog
+    GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(builder, "signal_params_dialog"));
+
     g_printerr("DEBUG: Widgets retrieved: window=%p, waveform=%p, spectrum=%p, combo=%p, button=%p, status=%p\n",
               state->window, state->waveform_area, state->spectrum_area,
-              state->device_combo, state->signal_type_combo, state->start_stop_button, state->status_label);
+              state->device_combo, state->signal_type_combo, state->start_stop_button, state->status_label, state->generate_button, state->cancel_button, dialog);
 
 
     if (!state->window || !state->waveform_area || !state->spectrum_area ||
-        !state->device_combo || !state->signal_type_combo || !state->start_stop_button || !state->status_label) {
+        !state->device_combo || !state->signal_type_combo || !state->start_stop_button || !state->status_label ||
+        !state->generate_button || !state->cancel_button || !dialog) {
         fprintf(stderr, "app_activate: Failed to get all widgets from UI file.\n");
         g_object_unref(builder);
         return;
@@ -472,18 +491,21 @@ static void app_activate(GtkApplication *app, gpointer user_data)
     state->builder = builder;
     g_printerr("DEBUG: All widgets OK\n");
 
+    //ensure dialog buttons are visible
+    gtk_widget_set_visible(state->generate_button, TRUE);
+    gtk_widget_set_visible(state->cancel_button, TRUE);
+
     //connect dialog signals
-    GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(builder, "signal_params_dialog"));
+    //GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(builder, "signal_params_dialog"));
     g_signal_connect(dialog, "close-request", G_CALLBACK(on_dialog_closed), state);
 
+    g_signal_connect(state->generate_button, "clicked", G_CALLBACK(on_dialog_generate), state);
+    g_signal_connect(state->cancel_button, "clicked", G_CALLBACK(on_dialog_cancel), state);
 
-    GtkWidget *dialog_generate = GTK_WIDGET(gtk_builder_get_object(builder, "dialog_generate_button"));
-    GtkWidget *dialog_cancel = GTK_WIDGET(gtk_builder_get_object(builder, "dialog_cancel_button"));
+    //set transient parent for dialog
+    gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(state->window));
 
-    g_signal_connect(dialog_generate, "clicked", G_CALLBACK(on_dialog_generate), state);
-    g_signal_connect(dialog_cancel, "clicked", G_CALLBACK(on_dialog_cancel), state);
-
-    //Populate device list
+    //Populate combos
     populate_device_combo(state);
     populate_signal_type_combo(state);
     g_printerr("DEBUG: Device combo populated");

@@ -16,26 +16,12 @@
                 <property name="margin-top">5</property>
                 <property name="margin-bottom">5</property>
 
-                <!-- Control Bar -->
+                <!-- Control Bar (Order: Signal → Device → Start) -->
                 <child>
                     <object class="GtkBox" id="control_box">
                         <property name="orientation">horizontal</property>
                         <property name="spacing">10</property>
                         <property name="halign">fill</property>
-
-                        <!-- Device Label -->
-                        <child>
-                            <object class="GtkLabel" id="device_label">
-                                <property name="label">Device:</property>
-                            </object>
-                        </child>
-
-                        <!-- Device Dropdown -->
-                        <child>
-                            <object class="GtkDropDown" id="device_combo">
-                                <property name="hexpand">True</property>
-                            </object>
-                        </child>
 
                         <!-- Signal Type Label -->
                         <child>
@@ -51,11 +37,17 @@
                             </object>
                         </child>
 
-                        <!-- Generate Signal Button -->
+                        <!-- Device Label -->
                         <child>
-                            <object class="GtkButton" id="generate_button">
-                                <property name="label">Generate Signal</property>
-                                <property name="hexpand">False</property>
+                            <object class="GtkLabel" id="device_label">
+                                <property name="label">Device:</property>
+                            </object>
+                        </child>
+
+                        <!-- Device Dropdown -->
+                        <child>
+                            <object class="GtkDropDown" id="device_combo">
+                                <property name="hexpand">True</property>
                             </object>
                         </child>
 
@@ -123,20 +115,10 @@
         <property name="title">Signal Params</property>
         <property name="modal">True</property>
         <property name="default-width">450</property>
-        <property name="default-height">350</property>
+        <property name="default-height">400</property>
         <property name="resizable">False</property>
-        <child type="action">
-            <object class="GtkButton" id="dialog_generate_button">
-                <property name="label">Generate</property>
-                <property name="halign">center</property>
-            </object>
-        </child>
-        <child type="action">
-            <object class="GtkButton" id="dialog_cancel_button">
-                <property name="label">Cancel</property>
-                <property name="halign">center</property>
-            </object>
-        </child>
+        <!-- <property name="use-header-bar">0</property>    show action buttons -->
+
         <child>
             <object class="GtkBox" id="dialog_vbox">
                 <property name="orientation">vertical</property>
@@ -149,8 +131,7 @@
                 <!-- Signal Type Label (inside dialog) -->
                 <child>
                     <object class="GtkLabel" id="dialog_signal_type_label">
-                        <property name="label">Signal Type: <span weight="bold">Sine Wave</span></property>
-                        <property name="use-markup">True</property>
+                        <property name="label">Signal Type: Sine Wave</property>
                         <property name="halign">start</property>
                     </object>
                 </child>
@@ -363,6 +344,41 @@
                                 <property name="label">Params for this signal type will be available in a future update.</property>
                                 <property name="halign">center</property>
                                 <property name="wrap">True</property>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+
+                <!-- seperator -->
+                <child>
+                    <object class="GtkSeparator" id="dialog_button_separator">
+                        <property name="orientation">horizontal</property>
+                    </object>
+                </child>
+
+                <!-- Button Box: horizontal container for buttons -->
+                <child>
+                    <object class="GtkBox" id="dialog_button_box">
+                        <property name="orientation">horizontal</property>
+                        <property name="spacing">10</property>
+                        <property name="halign">end</property>
+                        <property name="margin-top">10</property>
+
+                        <!-- Cancel button -->
+                        <child>
+                            <object class="GtkButton" id="dialog_cancel_button">
+                                <property name="label">Cancel</property>
+                                <property name="visible">True</property>
+                                <property name="halign">center</property>
+                            </object>
+                        </child>
+
+                        <!-- generate button -->
+                        <child>
+                            <object class="GtkButton" id="dialog_generate_button">
+                                <property name="label">Generate</property>
+                                <property name="visible">True</property>
+                                <property name="halign">center</property>
                             </object>
                         </child>
                     </object>
