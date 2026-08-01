@@ -25,7 +25,8 @@ It is designed as the software frontend for the acoustic impedance tube project,
   6. logarithmic sweep (next, because it's awesome 😂️😍️)
 - **Dark/Light theme toggle** – for comfortable viewing (activated based on System setting)
 
-![v0.2.png](v0.2.png)
+<img width="913" height="652" alt="v0 2" src="https://github.com/user-attachments/assets/0ccbcbde-f991-40ef-ab95-bcc3868ef6a3" />
+
   
 ## Planned Features
 
