@@ -9,6 +9,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <unistd.h> //for usleep
+
+//signal generator headers
+
 #include "signals/sine_wave.h"
 #include "signals/linear_sweep.h"
 
@@ -33,10 +37,17 @@ static SignalParams current_params = {
     .frequency_end = 1000.0f,
     .amplitude = 0.5f,
     .sweep_duration = 5.0f,
-    .is_active = 1 //change to 1 for testing
+    .is_active = 0, //change to 1 for testing
+    .sample_rate = SAMPLE_RATE
 };
 
 static pthread_mutex_t params_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+//check if device name contains "pulse"
+static int is_pulse_device(const char *name) {
+    if (name == NULL) return 0;
+    return (strstr(name, "pulse") != NULL || strstr(name, "pulse") != NULL);
+}
 
 /* signal generator */
 static float generate_signal_sample(const SignalParams *params, uint64_t sample_index) {
@@ -143,6 +154,11 @@ static int enumerate_devices(void) {
         if (info == NULL) continue;
         if (info->maxInputChannels <= 0) continue; //input only
 
+        //skip PulseAudio devices as may cause instability
+        if (is_pulse_device(info->name)) {
+            continue;
+        }
+
         device_list[device_count].index = i;
         strncpy(device_list[device_count].name, info->name, sizeof(device_list[device_count].name) - 1);
         device_list[device_count].name[sizeof(device_list[device_count].name) -1] = '\0';
@@ -229,13 +245,53 @@ static int open_stream(void) {
         audio_callback,
         global_rb);
 
+    //if opening fails and it's a hardware device, fall back to default
     if (err != paNoError) {
         fprintf(stderr, "audio: Pa_OpenStream error: %s\n", Pa_GetErrorText(err));
-        stream = NULL;
-        return -1;
+
+        //check if we're using a hw:* device
+        if (strstr(in_info->name, "hw:") != NULL) {
+            fprintf(stderr, "audio: Hardware device failed. Falling back to 'default'.\n");
+
+            //find 'default' device in the list
+            int default_idx = -1;
+            for (int i = 0; i < device_count; i++) {
+                if (strstr(device_list[i].name, "default") != NULL) {
+                    default_idx = i;
+                    break;
+                }
+            }
+
+            if (default_idx >= 0) {
+                current_device_index = default_idx;
+                in_dev = device_list[default_idx].index;
+                inputParams.device = in_dev;
+
+                const PaDeviceInfo *def_info = Pa_GetDeviceInfo(in_dev);
+                if (def_info) {
+                    inputParams.suggestedLatency = def_info->defaultLowInputLatency;
+                }
+
+                err = Pa_OpenStream(&stream,
+                                    &inputParams,
+                                    &outputParams,
+                                    SAMPLE_RATE,
+                                    FRAMES_PER_BUFFER,
+                                    paClipOff,
+                                    audio_callback,
+                                    global_rb
+                );
+            }
+        }
+
+        if (err != paNoError) {
+            fprintf(stderr, "audio: Pa_Openstream fallback also failed: %s\n", Pa_GetErrorText(err));
+            stream = NULL;
+            return -1;
+        }
     }
 
-    printf("audio: Full-duplex stream opened on devices: input=%s, output=%s\n", in_info->name, out_info->name);
+    printf("audio: Full-duplex stream opened: input=%s, output=%s\n", in_info->name, out_info->name);
     return 0;
 }
 
@@ -353,16 +409,23 @@ int audio_select_device(int device_index) {
         return 0;
     }
 
-    //stop stream if running
+    //always stop the stream first
+    if (is_running) {
+        audio_stop();
+    }
+
+    /*stop stream if running
     int was_running = is_running;
     if (was_running) {
         audio_stop();
-    }
+    }*/
 
     //close old stream
     if (stream) {
         Pa_CloseStream(stream);
         stream = NULL;
+
+        usleep(100000); //100ms delay to let ALSA or ASIO release the device
     }
 
     //update current device
@@ -374,8 +437,8 @@ int audio_select_device(int device_index) {
         return -1;
     }
 
-    //restart if it was running
-    if (was_running) {
+    //restart only  if it was running before
+    if (is_running) {
         if (audio_start() != 0) {
             fprintf(stderr, "audio_select_device: Failed to restart stream.\n");
             return -1;
