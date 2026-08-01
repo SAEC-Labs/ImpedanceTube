@@ -43,6 +43,12 @@ typedef struct {
     SignalParams signal_params;
 } GUIState;
 
+//check if device name contains "pulse"
+static int is_pulse_device(const char *name) {
+    if (name == NULL) return 0;
+    return (strstr(name, "pulse") != NULL || strstr(name, "pulse") != NULL);
+}
+
 //update dialog labels and visibility based on signal type
 static void update_dialog_visibility(GUIState *state) {
     guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(state->signal_type_combo));
@@ -60,7 +66,7 @@ static void update_dialog_visibility(GUIState *state) {
     char markup[256];
     snprintf(markup, sizeof(markup), "Signal Type: <span weight=\"bold\">%s</span>", type_names[selected]);
 
-    gtk_label_set_markup(GTK_LABEL(label), markup);
+    gtk_label_set_markup(GTK_LABEL(label), markup);//ui file needs to provide a plaintext placeholder
 
     //show/hide params boxes
     GtkWidget *sine_box = GTK_WIDGET(gtk_builder_get_object(state->builder, "sine_params_box"));
@@ -74,9 +80,23 @@ static void update_dialog_visibility(GUIState *state) {
 
 static void show_signal_dialog(GUIState *state) {
     GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(state->builder, "signal_params_dialog"));
-    update_dialog_visibility(state);
 
+    //set transient parent to prevent focus issues
+    gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(state->window));
+    
+    update_dialog_visibility(state);
+    //gtk_widget_show(dialog);
+    gtk_widget_set_visible(dialog, TRUE);
     gtk_window_present(GTK_WINDOW(dialog));
+}
+
+
+//dialog management (hide/show instead of destroy)
+static gboolean on_dialog_closed(GtkWindow *dialog, gpointer user_data) {
+    (void) user_data;
+    gtk_widget_set_visible(GTK_WIDGET(dialog), FALSE);
+    //gtk_widget_hide(GTK_WIDGET(dialog));
+    return GDK_EVENT_STOP; //prevent default destruction
 }
 
 static void on_dialog_generate(GtkButton *button, gpointer user_data) {
@@ -125,18 +145,119 @@ static void on_dialog_generate(GtkButton *button, gpointer user_data) {
 
     gtk_label_set_text(GTK_LABEL(state->status_label), status);
 
-    //close dialog
+    //hide dialog instead of destrying
     GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(builder, "signal_params_dialog"));
-    gtk_window_destroy(GTK_WINDOW(dialog));
+    //gtk_widget_hide(dialog);
+    //gtk_window_destroy(GTK_WINDOW(dialog));
+    gtk_widget_set_visible(dialog, FALSE);
 }
 
 static void on_dialog_cancel(GtkButton *button, gpointer user_data) {
     GUIState *state = (GUIState*) user_data;
     GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(state->builder, "signal_params_dialog"));
 
-    gtk_window_destroy(GTK_WINDOW(dialog));
+    //gtk_window_destroy(GTK_WINDOW(dialog));
+    //gtk_widget_hide(dialog);
+    gtk_widget_set_visible(dialog, FALSE);
 }
 
+//signal handler
+static void on_device_changed(GObject *object, GParamSpec *pspec, gpointer user_data)
+{
+    GUIState *state = (GUIState*) user_data;
+    guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(object));
+
+    if (selected == GTK_INVALID_LIST_POSITION) return;
+
+    const AudioDeviceInfo *info = audio_get_device_info(selected);
+    if (info == NULL) return;
+
+    if (is_pulse_device(info->name)) {
+        gtk_label_set_text(GTK_LABEL(state->status_label), "Error: PulseAudio devices not supported. Select hardware device.");
+        return;
+    }
+
+    if (audio_select_device(info->index) == 0) {
+        char status[256];
+        snprintf(status, sizeof(status),
+                 "Device: %s  |  Sample Rate: %d Hz  |  FFT Size: %d  |  %s",
+                 audio_get_device_name(), SAMPLE_RATE, state->fft_size,
+                 state->is_streaming ? "Running" : "Stopped");
+        gtk_label_set_text(GTK_LABEL(state->status_label), status);
+    } else {
+        gtk_label_set_text(GTK_LABEL(state->status_label), "ERROR: Failed to switch device");
+    }
+}
+
+
+static void on_signal_type_changed(GObject *object, GParamSpec *pspec, gpointer user_data)
+{
+    GUIState *state = (GUIState*) user_data;
+    show_signal_dialog(state);
+}
+
+//device combo box
+static void populate_device_combo(GUIState *state)
+{
+    GtkStringList *string_list = gtk_string_list_new(NULL);
+    int num_devices = audio_get_device_count();
+
+    for (int i = 0; i < num_devices; i++) {
+        const AudioDeviceInfo *info = audio_get_device_info(i);
+        if (info == NULL) continue;
+        if (is_pulse_device(info->name)) continue; // filter out PulseAudio
+        gtk_string_list_append(string_list, info->name);
+    }
+
+    GtkWidget *drop_down = gtk_drop_down_new(G_LIST_MODEL(string_list), NULL);
+    //Replace the old combo box with the new drop-down
+    //Get parent container and replace child
+    GtkWidget *parent = gtk_widget_get_parent(state->device_combo);
+    if (parent) {
+        gtk_box_remove(GTK_BOX(parent), state->device_combo);
+        gtk_box_append(GTK_BOX(parent), drop_down);
+        gtk_widget_set_hexpand(drop_down, TRUE);
+        state->device_combo = drop_down;
+        g_signal_connect(state->device_combo, "notify::selected",
+                         G_CALLBACK(on_device_changed), state);
+    }
+
+    //Select first item
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(state->device_combo), 0);
+    g_object_unref(string_list);
+}
+
+
+static void populate_signal_type_combo(GUIState *state) {
+    GtkStringList *string_list = gtk_string_list_new(NULL);
+    const char *signal_names[] = {
+        "Sine Wave",
+        "Linear Sweep",
+        "Log Sweep (Future)",
+        "White Noise (Future)",
+        "Pink Noise (Future)",
+        "Brownian Noise (Future)"
+    };
+
+    for (size_t i = 0; i < G_N_ELEMENTS(signal_names); i++) {
+        gtk_string_list_append(string_list, signal_names[i]);
+    }
+
+    GtkWidget *drop_down = gtk_drop_down_new(G_LIST_MODEL(string_list), NULL);
+    GtkWidget *parent = gtk_widget_get_parent(state->signal_type_combo);
+
+    if (parent) {
+        gtk_box_remove(GTK_BOX(parent), state->signal_type_combo);
+        gtk_box_append(GTK_BOX(parent), drop_down);
+        gtk_widget_set_hexpand(drop_down, TRUE);
+        state->signal_type_combo = drop_down;
+
+        //connect signal to open dialog when selection changes
+        g_signal_connect(state->signal_type_combo, "notify::selected", G_CALLBACK(on_signal_type_changed), state);
+    }
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(state->signal_type_combo), 0);
+    g_object_unref(string_list);
+}
 
 
 //drawing callbacks, gtk4 styles
@@ -216,28 +337,6 @@ static gboolean update_plots(gpointer user_data)
     return G_SOURCE_CONTINUE;
 }
 
-//signal handler
-static void on_device_changed(GObject *object, GParamSpec *pspec, gpointer user_data)
-{
-    GUIState *state = (GUIState*) user_data;
-
-    guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(object));
-    if (selected == GTK_INVALID_LIST_POSITION) return;
-
-    const AudioDeviceInfo *info = audio_get_device_info(selected);
-    if (info == NULL) return;
-
-    if (audio_select_device(info->index) == 0) {
-        char status[256];
-        snprintf(status, sizeof(status),
-                 "Device: %s  |  Sample Rate: %d Hz  |  FFT Size: %d  |  %s",
-                 audio_get_device_name(), SAMPLE_RATE, state->fft_size,
-                 state->is_streaming ? "Running" : "Stopped");
-        gtk_label_set_text(GTK_LABEL(state->status_label), status);
-    } else {
-        gtk_label_set_text(GTK_LABEL(state->status_label), "ERROR: Failed to switch device");
-    }
-}
 
 //start/stop button
 static void on_start_stop_toggled(GtkToggleButton *button, gpointer user_data)
@@ -273,6 +372,7 @@ static void on_start_stop_toggled(GtkToggleButton *button, gpointer user_data)
             state->waveform_frames = 0;
             memset(state->waveform_buffer, 0, state->fft_size * sizeof(float));
             memset(state->spectrum_buffer, 0, (state->fft_size / 2) * sizeof(float));
+
             gtk_widget_queue_draw(state->waveform_area);
             gtk_widget_queue_draw(state->spectrum_area);
         } else {
@@ -300,70 +400,11 @@ static void on_window_closed(GtkWindow *window, gpointer user_data)
     g_application_quit(G_APPLICATION(gtk_window_get_application(window)));
 }
 
-static void on_generate_button_clicked(GtkButton *button, gpointer user_data) {
+/*static void on_generate_button_clicked(GtkButton *button, gpointer user_data) {
     GUIState *state = (GUIState*) user_data;
     show_signal_dialog(state);
-}
+} */
 
-//device combo box
-static void populate_device_combo(GUIState *state)
-{
-    GtkStringList *string_list = gtk_string_list_new(NULL);
-    int num_devices = audio_get_device_count();
-
-    for (int i = 0; i < num_devices; i++) {
-        const AudioDeviceInfo *info = audio_get_device_info(i);
-        if (info) {
-            gtk_string_list_append(string_list, info->name);
-        }
-    }
-
-    GtkWidget *drop_down = gtk_drop_down_new(G_LIST_MODEL(string_list), NULL);
-    //Replace the old combo box with the new drop-down
-    //Get parent container and replace child
-    GtkWidget *parent = gtk_widget_get_parent(state->device_combo);
-    if (parent) {
-        gtk_box_remove(GTK_BOX(parent), state->device_combo);
-        gtk_box_append(GTK_BOX(parent), drop_down);
-        gtk_widget_set_hexpand(drop_down, TRUE);
-        state->device_combo = drop_down;
-        g_signal_connect(state->device_combo, "notify::selected",
-                         G_CALLBACK(on_device_changed), state);
-    }
-
-    //Select first item
-    gtk_drop_down_set_selected(GTK_DROP_DOWN(state->device_combo), 0);
-    g_object_unref(string_list);
-}
-
-static void populate_signal_type_combo(GUIState *state) {
-    GtkStringList *string_list = gtk_string_list_new(NULL);
-    const char *signal_names[] = {
-        "Sine Wave",
-        "Linear Sweep",
-        "Log Sweep (Future)",
-        "White Noise (Future)",
-        "Pink Noise (Future)",
-        "Brownian Noise (Future)"
-    };
-
-    for (size_t i = 0; i < G_N_ELEMENTS(signal_names); i++) {
-        gtk_string_list_append(string_list, signal_names[i]);
-    }
-
-    GtkWidget *drop_down = gtk_drop_down_new(G_LIST_MODEL(string_list), NULL);
-    GtkWidget *parent = gtk_widget_get_parent(state->signal_type_combo);
-
-    if (parent) {
-        gtk_box_remove(GTK_BOX(parent), state->signal_type_combo);
-        gtk_box_append(GTK_BOX(parent), drop_down);
-        gtk_widget_set_hexpand(drop_down, TRUE);
-        state->signal_type_combo = drop_down;
-        //No signal connection needed, we read the value when generating
-    }
-    gtk_drop_down_set_selected(GTK_DROP_DOWN(state->signal_type_combo), 0);
-    g_object_unref(string_list);
-}
 
 //setup draw funcs and signal handlers
 static void setup_callbacks(GUIState *state)
@@ -379,7 +420,7 @@ static void setup_callbacks(GUIState *state)
     g_signal_connect(state->start_stop_button, "toggled", G_CALLBACK(on_start_stop_toggled), state);
 
     //generate button
-    g_signal_connect(state->generate_button, "clicked", G_CALLBACK(on_generate_button_clicked), state);
+    //g_signal_connect(state->generate_button, "clicked", G_CALLBACK(on_generate_button_clicked), state);
 
     //Window close
     g_signal_connect(state->window, "close-request", G_CALLBACK(on_window_closed), state);
@@ -412,17 +453,17 @@ static void app_activate(GtkApplication *app, gpointer user_data)
     state->spectrum_area = GTK_WIDGET(gtk_builder_get_object(builder, "spectrum_area"));
     state->device_combo = GTK_WIDGET(gtk_builder_get_object(builder, "device_combo"));
     state->signal_type_combo = GTK_WIDGET(gtk_builder_get_object(builder, "signal_type_combo"));
-    state->generate_button = GTK_WIDGET(gtk_builder_get_object(builder, "generate_button"));
+    //state->generate_button = GTK_WIDGET(gtk_builder_get_object(builder, "generate_button"));
     state->start_stop_button = GTK_WIDGET(gtk_builder_get_object(builder, "start_stop_button"));
     state->status_label = GTK_WIDGET(gtk_builder_get_object(builder, "status_label"));
 
     g_printerr("DEBUG: Widgets retrieved: window=%p, waveform=%p, spectrum=%p, combo=%p, button=%p, status=%p\n",
               state->window, state->waveform_area, state->spectrum_area,
-              state->device_combo, state->start_stop_button, state->status_label);
+              state->device_combo, state->signal_type_combo, state->start_stop_button, state->status_label);
 
 
     if (!state->window || !state->waveform_area || !state->spectrum_area ||
-        !state->device_combo || !state->signal_type_combo || state->generate_button || !state->start_stop_button || !state->status_label) {
+        !state->device_combo || !state->signal_type_combo || !state->start_stop_button || !state->status_label) {
         fprintf(stderr, "app_activate: Failed to get all widgets from UI file.\n");
         g_object_unref(builder);
         return;
@@ -431,7 +472,11 @@ static void app_activate(GtkApplication *app, gpointer user_data)
     state->builder = builder;
     g_printerr("DEBUG: All widgets OK\n");
 
-    //connect dialog button signals
+    //connect dialog signals
+    GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(builder, "signal_params_dialog"));
+    g_signal_connect(dialog, "close-request", G_CALLBACK(on_dialog_closed), state);
+
+
     GtkWidget *dialog_generate = GTK_WIDGET(gtk_builder_get_object(builder, "dialog_generate_button"));
     GtkWidget *dialog_cancel = GTK_WIDGET(gtk_builder_get_object(builder, "dialog_cancel_button"));
 
