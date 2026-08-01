@@ -16,21 +16,30 @@ It is designed as the software frontend for the acoustic impedance tube project,
 - 🐧 Works on Linux (ALSA) and Windows (ASIO/WASAPI)
 - 🖲️ Start/Stop stream control
 - 📟️ Device selection to choose input device from dropdown
+- 🔊️ Excitation signal generator with freq range and amplitude sliders: 
+   1. sine wave ☑️
+  2. linear sweep ☑️
+  3. white noise (future)
+  4. pink noise (future)
+  5. brownian noise (future)
+  6. logarithmic sweep (next, because it's awesome 😂️😍️)
+- **Dark/Light theme toggle** – for comfortable viewing (activated based on System setting)
+
+![v0.2.png](v0.2.png)
   
 ## Planned Features
 
 ### 🖥️ GUI Enhancements
 
-- **Excitation signal generator** – sine, sweep, white noise, pink noise with frequency range and amplitude sliders.
 - **Multi‑tab display** – separate tabs for waveform, spectrum, transfer function, absorption coefficient plots.
 - **Peak frequency marker** – click‑to‑measure dominant frequency
 - **Data logging** – save raw WAV files, CSV with timestamps, and JSON metadata (sample info, environment)
 - **Export plots** – save waveform/spectrum as PNG
-- **Dark/Light theme toggle** – for comfortable viewing
+
 
 ### 📊 Heavy DSP Backend
 
-- **Two‑channel (stereo) and four channel processing**
+- **Two‑channel (stereo) and four channel input processing**
 - **Cross‑spectrum & auto‑spectrum** – `S12`, `S11`, `S22` with averaging
 - **Transfer function** – `H12 = S12 / S11`
 - **Reflection coefficient** – `R` (complex)
@@ -41,7 +50,7 @@ It is designed as the software frontend for the acoustic impedance tube project,
 
 ### 🔌 Hardware Integration
 
-- **STM32 USB Audio support** – replace PC microphone with custom DAQ
+- **STM32 USB Audio support** – replace PC mic stream with custom STM32 DAQ streams.
 - **Simultaneous 4‑channel capture** – for full four‑microphone transmission loss measurements
 - **Auto‑detection of USB audio interfaces** – plug‑and‑play support
 
@@ -71,39 +80,47 @@ It is designed as the software frontend for the acoustic impedance tube project,
    mkdir build && cd build
    cmake ..
    make -j$(nproc)
-4. Run the binary
+4. Run the binary.
+
+Note: You can also load the project as a Cmake project in your favorite IDE and build.
 
 ## On Windows - Native build with MSYS2
 This method builds a native Windows executable inside the MSYS2 UCRT64 environment.
 
-1. **Install MSYS2 from [ https://www.msys2.org/ ] and launch the UCRT64 terminal.**
+1. **Install MSYS2 from https://www.msys2.org/ and launch the UCRT64 terminal.**
 2. **Install Dependencies**
    ```bash
-   pacman -S mingw-w64-ucrt-x86_64-cmake \
-          mingw-w64-ucrt-x86_64-gcc \
-          mingw-w64-ucrt-x86_64-portaudio \
-          mingw-w64-ucrt-x86_64-gtk4 \
-          mingw-w64-ucrt-x86_64-make
+   pacman -S git
+   pacman -Syy
+   pacman -S mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-portaudio mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-make git
 3. **clone and build**
    ```bash
    git clone https://github.com/SAEC-Labs/ImpedanceTube.git
-   chdir WaveView
+   chdir ImopedanceTube/WaveView/
    mkdir build && chdir build
    cmake .. -G "MinGW Makefiles"
    make -j$(nproc)
 4. **Run the `.exe` file**
 
 ## Usage
-1. Plug in a microphone (or use the built‑in one).
-2. Launch the software, preferrably via terminal to see stdout and stderr. Click the Start/Stop button
-3. Speak, whistle, or make noise – the waveform and FFT spectrum update live.
-4. Close the window or press Ctrl+C to exit.
+1. Plug in a microphone (or use the built‑in one). Best experience if you have AUX headphones 🎧️
+2. Launch the software, preferrably via terminal to see stdout and stderr. Click the Start/Stop button.
+3. Open the signal generator dropdown to generate a signal, will play on your inbuilt speaker or plugged in headphones. Adjust amplitude and duration.
+4. Speak, whistle, or make noise, the waveform and FFT spectrum update live as your speaker outputs the generating signal.
+5. Close the window or press Ctrl+C to exit.
+
+## Known Issues
+1. Selecting and working with the hardware device `(hw:*)` on Linux from the dropdown sometimes hangs the stream. 
+   This is a direct driver initialization error and will be fixed. 
+
+**Quick fix**: Make sure to select the `default` device.
 
 ## Authors & Credits
-1. **SAEC Team** – Mechatronics Engineering students, DeKUT
+1. **The awesome SAEC Team** – Bsc. Mechatronics Engineering students, DeKUT
 2. **KissFFT** – Mark Borgerding (public domain / BSD)
 3. **PortAudio** – PortAudio community (MIT)
 4. **GTK** – The GTK team (LGPL)
+5. **JetBrains s.r.o** - For renewing my CLion IDE Student's Licence to use for this dev work!
 
 ## License
 See the `LICENSE` for details

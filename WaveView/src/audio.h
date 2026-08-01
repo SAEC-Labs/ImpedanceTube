@@ -10,6 +10,9 @@
 #define WAVEVIEW_AUDIO_H
 
 #include "ring_buffer.h"
+#include "signals/signals.h"
+//#include <stdint.h>
+
 
 /**
  * Device information structure
@@ -21,13 +24,30 @@ typedef struct {
 } AudioDeviceInfo;
 
 /**
- * Initialize the audio capture subsystem.
+ * Initialize the audio capture subsystem with full-duplex stream.
+ * opens both default input (mic) and default output (speaker)
  *
  * @param rb  Pointer to a ring buffer where audio samples will be written.
  *            Must be created and valid before calling this function.
  * @return    0 on success, -1 on failure.
  */
 int audio_init(RingBuffer *rb);
+
+/**
+ * Update the signal parameters from the GUI thread.
+ * This function is thread‑safe – it copies the parameters
+ * under a mutex so the audio callback reads a consistent set.
+ * @param params  Pointer to new SignalParams
+ * @return        0 on success, -1 on failure
+ */
+int audio_update_signal_params(const SignalParams *params);
+
+/**
+ * Get the current signal parameters (for debugging).
+ * @param params  Output pointer to copy current params into
+ * @return        0 on success, -1 on failure
+ */
+int audio_get_signal_params(SignalParams *params);
 
 /**
  * Get number of available input devices

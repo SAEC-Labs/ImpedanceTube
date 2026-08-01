@@ -27,6 +27,11 @@ add_executable(WaveView main.c
         src/external/kissfft/kiss_fft.c
         src/external/kissfft/kiss_fftr.h
         src/external/kissfft/kiss_fftr.c
+        src/signals/sine_wave.c
+        src/signals/sine_wave.h
+        src/signals/signals.h
+        src/signals/linear_sweep.c
+        src/signals/linear_sweep.h
 )
 
 # Link the libs

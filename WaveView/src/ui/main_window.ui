@@ -3,7 +3,7 @@
     <requires lib="gtk" version="4.0"/>
 
     <object class="GtkApplicationWindow" id="main_window">
-        <property name="title">WaveView – Real-time Microphone Input</property>
+        <property name="title">WaveView – RealTime Signal Viewer &amp; Analyzer</property>
         <property name="default-width">900</property>
         <property name="default-height">700</property>
         <property name="resizable">True</property>
@@ -16,12 +16,26 @@
                 <property name="margin-top">5</property>
                 <property name="margin-bottom">5</property>
 
-                <!-- Control Bar -->
+                <!-- Control Bar (Order: Signal → Device → Start) -->
                 <child>
                     <object class="GtkBox" id="control_box">
                         <property name="orientation">horizontal</property>
                         <property name="spacing">10</property>
                         <property name="halign">fill</property>
+
+                        <!-- Signal Type Label -->
+                        <child>
+                            <object class="GtkLabel" id="signal_type_label">
+                                <property name="label">Signal:</property>
+                            </object>
+                        </child>
+
+                        <!-- Signal Type Dropdown -->
+                        <child>
+                            <object class="GtkDropDown" id="signal_type_combo">
+                                <property name="hexpand">True</property>
+                            </object>
+                        </child>
 
                         <!-- Device Label -->
                         <child>
@@ -30,9 +44,9 @@
                             </object>
                         </child>
 
-                        <!-- Device Combo Box -->
+                        <!-- Device Dropdown -->
                         <child>
-                            <object class="GtkComboBoxText" id="device_combo">
+                            <object class="GtkDropDown" id="device_combo">
                                 <property name="hexpand">True</property>
                             </object>
                         </child>
@@ -50,7 +64,7 @@
                 <!-- Title Label -->
                 <child>
                     <object class="GtkLabel" id="title_label">
-                        <property name="label">🎤 Live Microphone Input</property>
+                        <property name="label">🎤 Live Microphone Streams</property>
                         <property name="halign">center</property>
                         <property name="vexpand">False</property>
                     </object>
@@ -90,6 +104,283 @@
                         <property name="margin-end">5</property>
                         <property name="margin-top">3</property>
                         <property name="margin-bottom">3</property>
+                    </object>
+                </child>
+            </object>
+        </child>
+    </object>
+
+    <!-- Signal Parameter Dialog -->
+    <object class="GtkDialog" id="signal_params_dialog">
+        <property name="title">Signal Params</property>
+        <property name="modal">True</property>
+        <property name="default-width">450</property>
+        <property name="default-height">400</property>
+        <property name="resizable">False</property>
+        <!-- <property name="use-header-bar">0</property>    show action buttons -->
+
+        <child>
+            <object class="GtkBox" id="dialog_vbox">
+                <property name="orientation">vertical</property>
+                <property name="spacing">15</property>
+                <property name="margin-start">15</property>
+                <property name="margin-end">15</property>
+                <property name="margin-top">15</property>
+                <property name="margin-bottom">15</property>
+
+                <!-- Signal Type Label (inside dialog) -->
+                <child>
+                    <object class="GtkLabel" id="dialog_signal_type_label">
+                        <property name="label">Signal Type: Sine Wave</property>
+                        <property name="halign">start</property>
+                    </object>
+                </child>
+
+                <!-- Separator -->
+                <child>
+                    <object class="GtkSeparator" id="dialog_separator">
+                        <property name="orientation">horizontal</property>
+                    </object>
+                </child>
+
+                <!-- Sine Parameters Box -->
+                <child>
+                    <object class="GtkBox" id="sine_params_box">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">8</property>
+                        <property name="visible">True</property>
+
+                        <child>
+                            <object class="GtkBox" id="sine_freq_box">
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">10</property>
+                                <child>
+                                    <object class="GtkLabel" id="sine_freq_label">
+                                        <property name="label">Frequency (Hz):</property>
+                                        <property name="halign">start</property>
+                                        <property name="hexpand">True</property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="GtkSpinButton" id="sine_freq_spin">
+                                        <property name="adjustment">
+                                            <object class="GtkAdjustment">
+                                                <property name="lower">20</property>
+                                                <property name="upper">20000</property>
+                                                <property name="step-increment">1</property>
+                                                <property name="page-increment">10</property>
+                                                <property name="value">440</property>
+                                            </object>
+                                        </property>
+                                        <property name="width-chars">8</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+
+                        <child>
+                            <object class="GtkBox" id="sine_amp_box">
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">10</property>
+                                <child>
+                                    <object class="GtkLabel" id="sine_amp_label">
+                                        <property name="label">Amplitude:</property>
+                                        <property name="halign">start</property>
+                                        <property name="hexpand">True</property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="GtkScale" id="sine_amp_scale">
+                                        <property name="adjustment">
+                                            <object class="GtkAdjustment">
+                                                <property name="lower">0.0</property>
+                                                <property name="upper">1.0</property>
+                                                <property name="step-increment">0.01</property>
+                                                <property name="page-increment">0.1</property>
+                                                <property name="value">0.5</property>
+                                            </object>
+                                        </property>
+                                        <property name="digits">2</property>
+                                        <property name="width-request">200</property>
+                                        <property name="value-pos">right</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+
+                <!-- Sweep Parameters Box -->
+                <child>
+                    <object class="GtkBox" id="sweep_params_box">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">8</property>
+                        <property name="visible">False</property>
+
+                        <child>
+                            <object class="GtkBox" id="sweep_start_box">
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">10</property>
+                                <child>
+                                    <object class="GtkLabel" id="sweep_start_label">
+                                        <property name="label">Start Frequency (Hz):</property>
+                                        <property name="halign">start</property>
+                                        <property name="hexpand">True</property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="GtkSpinButton" id="sweep_start_spin">
+                                        <property name="adjustment">
+                                            <object class="GtkAdjustment">
+                                                <property name="lower">20</property>
+                                                <property name="upper">20000</property>
+                                                <property name="step-increment">1</property>
+                                                <property name="page-increment">10</property>
+                                                <property name="value">100</property>
+                                            </object>
+                                        </property>
+                                        <property name="width-chars">8</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+
+                        <child>
+                            <object class="GtkBox" id="sweep_end_box">
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">10</property>
+                                <child>
+                                    <object class="GtkLabel" id="sweep_end_label">
+                                        <property name="label">End Frequency (Hz):</property>
+                                        <property name="halign">start</property>
+                                        <property name="hexpand">True</property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="GtkSpinButton" id="sweep_end_spin">
+                                        <property name="adjustment">
+                                            <object class="GtkAdjustment">
+                                                <property name="lower">20</property>
+                                                <property name="upper">20000</property>
+                                                <property name="step-increment">1</property>
+                                                <property name="page-increment">10</property>
+                                                <property name="value">1000</property>
+                                            </object>
+                                        </property>
+                                        <property name="width-chars">8</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+
+                        <child>
+                            <object class="GtkBox" id="sweep_duration_box">
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">10</property>
+                                <child>
+                                    <object class="GtkLabel" id="sweep_duration_label">
+                                        <property name="label">Duration (seconds):</property>
+                                        <property name="halign">start</property>
+                                        <property name="hexpand">True</property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="GtkSpinButton" id="sweep_duration_spin">
+                                        <property name="adjustment">
+                                            <object class="GtkAdjustment">
+                                                <property name="lower">0.5</property>
+                                                <property name="upper">60</property>
+                                                <property name="step-increment">0.5</property>
+                                                <property name="page-increment">1.0</property>
+                                                <property name="value">5.0</property>
+                                            </object>
+                                        </property>
+                                        <property name="width-chars">8</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+
+                        <child>
+                            <object class="GtkBox" id="sweep_amp_box">
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">10</property>
+                                <child>
+                                    <object class="GtkLabel" id="sweep_amp_label">
+                                        <property name="label">Amplitude:</property>
+                                        <property name="halign">start</property>
+                                        <property name="hexpand">True</property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="GtkScale" id="sweep_amp_scale">
+                                        <property name="adjustment">
+                                            <object class="GtkAdjustment">
+                                                <property name="lower">0.0</property>
+                                                <property name="upper">1.0</property>
+                                                <property name="step-increment">0.01</property>
+                                                <property name="page-increment">0.1</property>
+                                                <property name="value">0.5</property>
+                                            </object>
+                                        </property>
+                                        <property name="digits">2</property>
+                                        <property name="width-request">200</property>
+                                        <property name="value-pos">right</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+
+                <!-- Future Signals Placeholder -->
+                <child>
+                    <object class="GtkBox" id="future_params_box">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">8</property>
+                        <property name="visible">False</property>
+                        <child>
+                            <object class="GtkLabel" id="future_label">
+                                <property name="label">Params for this signal type will be available in a future update.</property>
+                                <property name="halign">center</property>
+                                <property name="wrap">True</property>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+
+                <!-- seperator -->
+                <child>
+                    <object class="GtkSeparator" id="dialog_button_separator">
+                        <property name="orientation">horizontal</property>
+                    </object>
+                </child>
+
+                <!-- Button Box: horizontal container for buttons -->
+                <child>
+                    <object class="GtkBox" id="dialog_button_box">
+                        <property name="orientation">horizontal</property>
+                        <property name="spacing">10</property>
+                        <property name="halign">end</property>
+                        <property name="margin-top">10</property>
+
+                        <!-- Cancel button -->
+                        <child>
+                            <object class="GtkButton" id="dialog_cancel_button">
+                                <property name="label">Cancel</property>
+                                <property name="visible">True</property>
+                                <property name="halign">center</property>
+                            </object>
+                        </child>
+
+                        <!-- generate button -->
+                        <child>
+                            <object class="GtkButton" id="dialog_generate_button">
+                                <property name="label">Generate</property>
+                                <property name="visible">True</property>
+                                <property name="halign">center</property>
+                            </object>
+                        </child>
                     </object>
                 </child>
             </object>
