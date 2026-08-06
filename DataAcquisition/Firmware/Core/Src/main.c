@@ -91,6 +91,20 @@ static void led_blinking_task(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+extern bool is_audio_streaming_active(void);
+
+void update_sample_rate_hw(uint32_t rate)
+{
+  if (rate == 44100)
+  {
+    __HAL_TIM_SET_AUTORELOAD(&htim2, 1904);
+  }
+  else
+  {
+    __HAL_TIM_SET_AUTORELOAD(&htim2, 1749);
+  }
+}
+
 uint32_t tusb_time_millis_api(void)
 {
   return HAL_GetTick();
@@ -224,13 +238,16 @@ int main(void)
     led_blinking_task();
 
     /*
-     * Send 16-bit signed PCM ADC samples to USB Audio endpoint
+     * Send 16-bit signed PCM ADC samples to USB Audio endpoint (only when streaming is active!)
      */
     if (adc_conv_cplt)
     {
-      tud_audio_write(
-          pcm_buffer,
-          sizeof(pcm_buffer));
+      if (tud_mounted() && is_audio_streaming_active())
+      {
+        tud_audio_write(
+            pcm_buffer,
+            sizeof(pcm_buffer));
+      }
 
       adc_conv_cplt = 0;
     }
