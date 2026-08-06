@@ -5,7 +5,7 @@
 #include "tusb.h"
 #include <string.h>
 
-#define USB_PID 0x4003
+#define USB_PID 0x4006
 
 //--------------------------------------------------------------------+
 // Device Descriptor
@@ -71,8 +71,13 @@ enum {
   STRID_SERIAL,
 };
 
-char const *string_desc_arr[] = {(const char[]){0x09, 0x04}, "PaniRCorp",
-                                 "MicNode", NULL};
+char const *string_desc_arr[] = {
+    (const char[]){0x09, 0x04}, // 0: Language ID (0x0409)
+    "SAEC Labs",                // 1: Manufacturer
+    "SAEC_DAQ",                 // 2: Product
+    NULL,                       // 3: Serial
+    "SAEC Audio"                // 4: Interface Name
+};
 
 static uint16_t _desc_str[32 + 1];
 
@@ -88,7 +93,7 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
     break;
 
   case STRID_SERIAL: {
-    const char *serial = "STM32F401_001";
+    const char *serial = "SAEC_DAQ_001";
 
     chr_count = strlen(serial);
 
@@ -133,12 +138,19 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
 
 static uint32_t sampFreq = CFG_TUD_AUDIO_FUNC_1_SAMPLE_RATE;
 static uint8_t clkValid = 1;
+static volatile bool is_streaming = false;
 
 static audio20_control_range_4_n_t(1) sampleFreqRng = {
     .wNumSubRanges = 1,
     .subrange[0] = {.bMin = CFG_TUD_AUDIO_FUNC_1_SAMPLE_RATE,
                     .bMax = CFG_TUD_AUDIO_FUNC_1_SAMPLE_RATE,
                     .bRes = 0}};
+
+bool is_audio_streaming_active(void) {
+  return is_streaming;
+}
+
+extern void update_sample_rate_hw(uint32_t rate);
 
 static uint8_t mute[2] = {0, 0};
 static int16_t volume[2] = {0, 0};
@@ -186,6 +198,7 @@ bool tud_audio_set_req_entity_cb(uint8_t rhport,
     if (entityID == 4) {
       if (ctrlSel == AUDIO20_CS_CTRL_SAM_FREQ) {
         sampFreq = ((audio20_control_cur_4_t *)pBuff)->bCur;
+        update_sample_rate_hw(sampFreq);
         return true;
       }
     }
@@ -262,7 +275,8 @@ bool tud_audio_get_req_entity_cb(uint8_t rhport,
 bool tud_audio_set_itf_cb(uint8_t rhport,
                           tusb_control_request_t const *p_request) {
   (void)rhport;
-  (void)p_request;
+  uint8_t const alt = tu_u16_low(p_request->wValue);
+  is_streaming = (alt != 0);
   return true;
 }
 
@@ -270,5 +284,6 @@ bool tud_audio_set_itf_close_ep_cb(uint8_t rhport,
                                    tusb_control_request_t const *p_request) {
   (void)rhport;
   (void)p_request;
+  is_streaming = false;
   return true;
 }
