@@ -22,8 +22,11 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+
 #include <stdio.h>
 #include <string.h>
+#include "tusb.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -33,6 +36,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+
+#define AUDIO_BUFFER_SIZE 192
 
 /* USER CODE END PD */
 
@@ -45,10 +50,27 @@
 ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
 
+TIM_HandleTypeDef htim2;
+
 UART_HandleTypeDef huart1;
 DMA_HandleTypeDef hdma_usart1_tx;
 
+PCD_HandleTypeDef hpcd_USB_OTG_FS;
+
 /* USER CODE BEGIN PV */
+
+uint16_t adc_buffer[AUDIO_BUFFER_SIZE];
+int16_t  pcm_buffer[AUDIO_BUFFER_SIZE];
+
+volatile uint8_t adc_conv_cplt = 0;
+
+enum {
+  BLINK_NOT_MOUNTED = 250,
+  BLINK_MOUNTED = 1000,
+  BLINK_SUSPENDED = 2500,
+};
+
+static uint32_t blink_interval_ms = BLINK_NOT_MOUNTED;
 
 /* USER CODE END PV */
 
@@ -57,28 +79,76 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_TIM2_Init(void);
 static void MX_USART1_UART_Init(void);
+static void MX_USB_OTG_FS_PCD_Init(void);
 /* USER CODE BEGIN PFP */
+
+static void led_blinking_task(void);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-int isSent = 1;
-uint16_t mic1;
-int adc_conv_cplt = 0;
 
-void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+uint32_t tusb_time_millis_api(void)
 {
-  if (huart->Instance == USART1)
-  {
-    isSent = 1; // Set the flag to indicate that transmission is complete
-  }
+  return HAL_GetTick();
 }
+
+void tud_mount_cb(void)
+{
+  blink_interval_ms = BLINK_MOUNTED;
+  const char msg[] = "[USB] Device Mounted\r\n";
+  HAL_UART_Transmit(&huart1, (const uint8_t *)msg, strlen(msg), 100);
+}
+
+void tud_umount_cb(void)
+{
+  blink_interval_ms = BLINK_NOT_MOUNTED;
+  const char msg[] = "[USB] Device Unmounted\r\n";
+  HAL_UART_Transmit(&huart1, (const uint8_t *)msg, strlen(msg), 100);
+}
+
+void tud_suspend_cb(bool remote_wakeup_en)
+{
+  (void)remote_wakeup_en;
+  blink_interval_ms = BLINK_SUSPENDED;
+  const char msg[] = "[USB] Bus Suspended\r\n";
+  HAL_UART_Transmit(&huart1, (const uint8_t *)msg, strlen(msg), 100);
+}
+
+void tud_resume_cb(void)
+{
+  blink_interval_ms = tud_mounted() ? BLINK_MOUNTED : BLINK_NOT_MOUNTED;
+  const char msg[] = "[USB] Bus Resumed\r\n";
+  HAL_UART_Transmit(&huart1, (const uint8_t *)msg, strlen(msg), 100);
+}
+
+static void led_blinking_task(void)
+{
+  static uint32_t start_ms = 0;
+  if (HAL_GetTick() - start_ms < blink_interval_ms)
+  {
+    return;
+  }
+  start_ms += blink_interval_ms;
+  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+}
+
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 {
-  adc_conv_cplt = 1; // Set the flag to indicate that ADC conversion is complete
+  if (hadc->Instance == ADC1)
+  {
+    for (uint16_t i = 0; i < AUDIO_BUFFER_SIZE; i++)
+    {
+      // Convert 12-bit unsigned ADC (0..4095, Vref/2=2048) to 16-bit signed PCM (-32768..+32752)
+      pcm_buffer[i] = (int16_t)(((int32_t)adc_buffer[i] - 2048) << 4);
+    }
+    adc_conv_cplt = 1;
+  }
 }
+
 /* USER CODE END 0 */
 
 /**
@@ -112,34 +182,64 @@ int main(void)
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_ADC1_Init();
+  MX_TIM2_Init();
   MX_USART1_UART_Init();
+  MX_USB_OTG_FS_PCD_Init();
   /* USER CODE BEGIN 2 */
+
+  const char banner[] = "\r\n=== Impedance Tube DAQ Initializing ===\r\n";
+  HAL_UART_Transmit(&huart1, (const uint8_t *)banner, strlen(banner), 100);
+
+  /* Start USB device */
+  tusb_init();
+
+  const char usb_ok[] = "[USB] TinyUSB Initialized, waiting for host...\r\n";
+  HAL_UART_Transmit(&huart1, (const uint8_t *)usb_ok, strlen(usb_ok), 100);
+
+  /* Start TIM2 for precise 48 kHz sampling trigger */
+  HAL_TIM_Base_Start(&htim2);
+
+  /* Start ADC DMA */
+  HAL_ADC_Start_DMA(
+      &hadc1,
+      (uint32_t *)adc_buffer,
+      AUDIO_BUFFER_SIZE);
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  uint8_t packet[4];
-  HAL_ADC_Start_DMA(&hadc1, (uint32_t *)&mic1, 1); // Start ADC in DMA mode
+
   while (1)
   {
-    if (isSent && adc_conv_cplt)
+
+    /*
+     * TinyUSB device task
+     */
+    tud_task();
+
+    /*
+     * LED Heartbeat & status blink
+     */
+    led_blinking_task();
+
+    /*
+     * Send 16-bit signed PCM ADC samples to USB Audio endpoint
+     */
+    if (adc_conv_cplt)
     {
-      isSent = 0;
-      adc_conv_cplt = 0; // Clear the ADC conversion complete flag
+      tud_audio_write(
+          pcm_buffer,
+          sizeof(pcm_buffer));
 
-      packet[0] = (uint8_t)(mic1 & 0xFF);        // LSB
-      packet[1] = (uint8_t)((mic1 >> 8) & 0xFF); // MSB
-      packet[2] = 0xAA;                          // Start byte
-      packet[3] = 0xBB;                          // End byte
-
-      HAL_UART_Transmit_DMA(&huart1, packet, 4);
+      adc_conv_cplt = 0;
     }
+  }
 
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  }
+
   /* USER CODE END 3 */
 }
 
@@ -160,15 +260,14 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-  RCC_OscInitStruct.PLL.PLLM = 8;
-  RCC_OscInitStruct.PLL.PLLN = 84;
-  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-  RCC_OscInitStruct.PLL.PLLQ = 4;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLM = 25;
+  RCC_OscInitStruct.PLL.PLLN = 336;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
+  RCC_OscInitStruct.PLL.PLLQ = 7;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -213,10 +312,10 @@ static void MX_ADC1_Init(void)
   hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
   hadc1.Init.Resolution = ADC_RESOLUTION_12B;
   hadc1.Init.ScanConvMode = DISABLE;
-  hadc1.Init.ContinuousConvMode = ENABLE;
+  hadc1.Init.ContinuousConvMode = DISABLE;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
-  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
+  hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIGCONV_T2_TRGO;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc1.Init.NbrOfConversion = 1;
   hadc1.Init.DMAContinuousRequests = ENABLE;
@@ -230,7 +329,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_0;
   sConfig.Rank = 1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_84CYCLES;
+  sConfig.SamplingTime = ADC_SAMPLETIME_15CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -239,6 +338,39 @@ static void MX_ADC1_Init(void)
 
   /* USER CODE END ADC1_Init 2 */
 
+}
+
+/**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 0;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 1749; // 84 MHz / 1750 = 48,000 Hz
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
 }
 
 /**
@@ -275,6 +407,41 @@ static void MX_USART1_UART_Init(void)
 }
 
 /**
+  * @brief USB_OTG_FS Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USB_OTG_FS_PCD_Init(void)
+{
+
+  /* USER CODE BEGIN USB_OTG_FS_Init 0 */
+
+  /* USER CODE END USB_OTG_FS_Init 0 */
+
+  /* USER CODE BEGIN USB_OTG_FS_Init 1 */
+
+  /* USER CODE END USB_OTG_FS_Init 1 */
+  hpcd_USB_OTG_FS.Instance = USB_OTG_FS;
+  hpcd_USB_OTG_FS.Init.dev_endpoints = 4;
+  hpcd_USB_OTG_FS.Init.speed = PCD_SPEED_FULL;
+  hpcd_USB_OTG_FS.Init.dma_enable = DISABLE;
+  hpcd_USB_OTG_FS.Init.phy_itface = PCD_PHY_EMBEDDED;
+  hpcd_USB_OTG_FS.Init.Sof_enable = DISABLE;
+  hpcd_USB_OTG_FS.Init.low_power_enable = DISABLE;
+  hpcd_USB_OTG_FS.Init.lpm_enable = DISABLE;
+  hpcd_USB_OTG_FS.Init.vbus_sensing_enable = DISABLE;
+  hpcd_USB_OTG_FS.Init.use_dedicated_ep1 = DISABLE;
+  if (HAL_PCD_Init(&hpcd_USB_OTG_FS) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USB_OTG_FS_Init 2 */
+
+  /* USER CODE END USB_OTG_FS_Init 2 */
+
+}
+
+/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -307,6 +474,7 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
@@ -335,10 +503,23 @@ static void MX_GPIO_Init(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
+  /* Enable GPIOC clock and configure PC13 if not done yet */
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  GPIO_InitStruct.Pin = GPIO_PIN_13;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
   __disable_irq();
   while (1)
   {
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+    for (volatile uint32_t i = 0; i < 200000; i++)
+    {
+      __NOP();
+    }
   }
   /* USER CODE END Error_Handler_Debug */
 }
