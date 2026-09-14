@@ -11,7 +11,6 @@
 
 #include "ring_buffer.h"
 #include "signals/signals.h"
-//#include <stdint.h>
 
 
 /**

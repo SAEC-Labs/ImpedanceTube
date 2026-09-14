@@ -16,11 +16,9 @@
 
 #include "ring_buffer.h"
 #include <stdlib.h>
-//#include <string.h>
-//#include <stdatomic.h>
 
 RingBuffer* ring_buffer_create(const int size) {
-    RingBuffer *rb = (RingBuffer*) calloc(1, sizeof(RingBuffer));
+    RingBuffer *rb = calloc(1, sizeof(RingBuffer));
     rb->buffer = (float*) calloc(size, sizeof(float));
     rb->size = size;
 
@@ -37,7 +35,6 @@ void ring_buffer_destroy(RingBuffer *rb) {
 }
 
 int ring_buffer_write(RingBuffer *rb, const float *data, int frames) {
-    //int write_idx = atomic_load(&rb->write_idx);
     int write_idx = rb->write_idx;
     int read_idx = rb->read_idx;
 

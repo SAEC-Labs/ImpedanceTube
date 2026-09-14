@@ -25,9 +25,9 @@ typedef enum {
 typedef struct {
     SignalType type;          //Which signal to generate
     float frequency;          //For sine, or start freq for sweep
-    float frequency_end;      //For sweep only
+    float frequency_end;      //For sweeps only
     float amplitude;          //Output volume (0.0 to 1.0)
-    float sweep_duration;     //Duration in seconds (for sweep)
+    float sweep_duration;     //Duration in seconds (for sweeps)
     int is_active;            // 1=output signal, 0=silence
     uint32_t sample_rate;     // Sample rate (from config)
 } SignalParams;

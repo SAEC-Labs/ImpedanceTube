@@ -6,7 +6,6 @@
 #define WAVEVIEW_RING_BUFFER_H
 
 #include <stdatomic.h>
-#include <stdint.h>
 
 typedef struct {
     float *buffer;

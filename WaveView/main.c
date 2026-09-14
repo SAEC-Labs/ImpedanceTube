@@ -21,6 +21,8 @@ static void signal_handler(int sig) {
     keep_running = 0;
     fprintf(stderr, "\nReceived interrupt signal. Shutting down...\n");
 
+    //TODO: more robust shutdown signal
+
 }
 
 int main(int argc, char **argv) {

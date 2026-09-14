@@ -13,7 +13,6 @@
 #include <cairo.h>
 #include <stdlib.h>
 #include <string.h>
-//#include <math.h>
 
 //GUI state struct
 typedef struct {
@@ -44,7 +43,7 @@ typedef struct {
     SignalParams signal_params;
 } GUIState;
 
-//check if device name contains "pulse"
+//check if device name contains "pulse" (linux)
 static int is_pulse_device(const char *name) {
     if (name == NULL) return 0;
     return (strstr(name, "pulse") != NULL || strstr(name, "pulse") != NULL);
@@ -107,12 +106,12 @@ static void show_signal_dialog(GUIState *state) {
 static gboolean on_dialog_closed(GtkWindow *dialog, gpointer user_data) {
     (void) user_data;
     gtk_widget_set_visible(GTK_WIDGET(dialog), FALSE);
-    //gtk_widget_hide(GTK_WIDGET(dialog));
+
     return GDK_EVENT_STOP; //prevent default destruction
 }
 
 static void on_dialog_generate(GtkButton *button, gpointer user_data) {
-    GUIState *state = (GUIState*) user_data;
+    GUIState *state = user_data;
     GtkBuilder *builder = state->builder;
     guint signal_type = gtk_drop_down_get_selected(GTK_DROP_DOWN(state->signal_type_combo));
 
@@ -159,8 +158,7 @@ static void on_dialog_generate(GtkButton *button, gpointer user_data) {
 
     //hide dialog instead of destroying
     GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(builder, "signal_params_dialog"));
-    //gtk_widget_hide(dialog);
-    //gtk_window_destroy(GTK_WINDOW(dialog));
+
     gtk_widget_set_visible(dialog, FALSE);
 }
 
@@ -168,9 +166,7 @@ static void on_dialog_cancel(GtkButton *button, gpointer user_data) {
     GUIState *state = (GUIState*) user_data;
     GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(state->builder, "signal_params_dialog"));
 
-    //gtk_window_destroy(GTK_WINDOW(dialog));
-    //gtk_widget_hide(dialog);
-    gtk_widget_set_visible(dialog, FALSE);
+    gtk_widget_set_visible(dialog, FALSE); //hide
 }
 
 //signal handler
@@ -217,7 +213,7 @@ static void populate_device_combo(GUIState *state)
     for (int i = 0; i < num_devices; i++) {
         const AudioDeviceInfo *info = audio_get_device_info(i);
         if (info == NULL) continue;
-        if (is_pulse_device(info->name)) continue; // filter out PulseAudio
+        if (is_pulse_device(info->name)) continue; // filter out PulseAudio (linux)
         gtk_string_list_append(string_list, info->name);
     }
 
@@ -269,6 +265,8 @@ static void populate_signal_type_combo(GUIState *state) {
     }
     gtk_drop_down_set_selected(GTK_DROP_DOWN(state->signal_type_combo), 0);
     g_object_unref(string_list);
+
+    //TODO: better coonect signal dialog when selection changes
 }
 
 
@@ -299,7 +297,7 @@ static void on_draw_waveform(GtkDrawingArea *area, cairo_t *cr, int width, int h
 
 static void on_draw_spectrum(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data)
 {
-    GUIState *state = (GUIState*) user_data;
+    GUIState *state = user_data;
     cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
     cairo_paint(cr);
 
@@ -316,6 +314,8 @@ static void on_draw_spectrum(GtkDrawingArea *area, cairo_t *cr, int width, int h
         double y = height - (state->spectrum_buffer[i] / max_val) * (height - 10);
         cairo_line_to(cr, x, y);
     }
+
+    //cairo magic!
     cairo_line_to(cr, width, height);
     cairo_close_path(cr);
 
@@ -353,7 +353,7 @@ static gboolean update_plots(gpointer user_data)
 //start/stop button
 static void on_start_stop_toggled(GtkToggleButton *button, gpointer user_data)
 {
-    GUIState *state = (GUIState*) user_data;
+    GUIState *state = user_data;
 
     if (gtk_toggle_button_get_active(button)) {
         //Start
@@ -396,7 +396,7 @@ static void on_start_stop_toggled(GtkToggleButton *button, gpointer user_data)
 
 static void on_window_closed(GtkWindow *window, gpointer user_data)
 {
-    GUIState *state = (GUIState*) user_data;
+    GUIState *state = user_data;
 
     g_printerr("DEBUG: on_window_closed() called\n");
 
@@ -412,11 +412,6 @@ static void on_window_closed(GtkWindow *window, gpointer user_data)
     g_application_quit(G_APPLICATION(gtk_window_get_application(window)));
 }
 
-/*static void on_generate_button_clicked(GtkButton *button, gpointer user_data) {
-    GUIState *state = (GUIState*) user_data;
-    show_signal_dialog(state);
-} */
-
 
 //setup draw funcs and signal handlers
 static void setup_callbacks(GUIState *state)
@@ -425,14 +420,8 @@ static void setup_callbacks(GUIState *state)
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(state->waveform_area), on_draw_waveform, state, NULL);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(state->spectrum_area), on_draw_spectrum, state, NULL);
 
-    //Device combo
-    //g_signal_connect(state->device_combo, "changed", G_CALLBACK(on_device_changed), state);
-
     //Start/Stop button
     g_signal_connect(state->start_stop_button, "toggled", G_CALLBACK(on_start_stop_toggled), state);
-
-    //generate button
-    //g_signal_connect(state->generate_button, "clicked", G_CALLBACK(on_generate_button_clicked), state);
 
     //Window close
     g_signal_connect(state->window, "close-request", G_CALLBACK(on_window_closed), state);
@@ -441,7 +430,7 @@ static void setup_callbacks(GUIState *state)
 //activation callback
 static void app_activate(GtkApplication *app, gpointer user_data)
 {
-    GUIState *state = (GUIState*) user_data;
+    GUIState *state = user_data;
     GtkBuilder *builder;
     GError *error = NULL;
 
@@ -491,12 +480,11 @@ static void app_activate(GtkApplication *app, gpointer user_data)
     state->builder = builder;
     g_printerr("DEBUG: All widgets OK\n");
 
-    //ensure dialog buttons are visible
+    //(ensure) dialog buttons are visible
     gtk_widget_set_visible(state->generate_button, TRUE);
     gtk_widget_set_visible(state->cancel_button, TRUE);
 
     //connect dialog signals
-    //GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(builder, "signal_params_dialog"));
     g_signal_connect(dialog, "close-request", G_CALLBACK(on_dialog_closed), state);
 
     g_signal_connect(state->generate_button, "clicked", G_CALLBACK(on_dialog_generate), state);
@@ -516,7 +504,7 @@ static void app_activate(GtkApplication *app, gpointer user_data)
 
     //init signal params
     state->signal_params.type = SIGNAL_SINE;
-    state->signal_params.frequency = 440.0f;
+    state->signal_params.frequency = 432.0f;
     state->signal_params.frequency_end = 1000.0f;
     state->signal_params.amplitude = 0.5f;
     state->signal_params.sweep_duration = 5.0f;
@@ -544,7 +532,7 @@ static void app_activate(GtkApplication *app, gpointer user_data)
     g_printerr("DEBUG: Auto-start toggled\n");
 
     //Start timer
-    g_timeout_add(50, update_plots, state);
+    g_timeout_add(50, update_plots, state); //every 50ms
     g_printerr("DEBUG: Timer started\n");
 
     g_printerr("DEBUG: app_activate() completed successfully\n");
@@ -558,7 +546,7 @@ int gui_run(int argc, char **argv, RingBuffer *rb)
         return -1;
     }
 
-    GUIState *state = (GUIState*) calloc(1, sizeof(GUIState));
+    GUIState *state = calloc(1, sizeof(GUIState));
     if (state == NULL) {
         fprintf(stderr, "gui_run: failed to allocate GUI state\n");
         return -1;
@@ -571,6 +559,7 @@ int gui_run(int argc, char **argv, RingBuffer *rb)
 
     state->waveform_buffer = (float*) malloc(FFT_SIZE * sizeof(float));
     state->spectrum_buffer = (float*) malloc((FFT_SIZE / 2) * sizeof(float));
+
     if (state->waveform_buffer == NULL || state->spectrum_buffer == NULL) {
         fprintf(stderr, "gui_run: failed to allocate plot buffers\n");
         free(state->waveform_buffer);
