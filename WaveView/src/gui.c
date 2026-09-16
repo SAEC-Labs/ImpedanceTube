@@ -394,6 +394,7 @@ static void on_start_stop_toggled(GtkToggleButton *button, gpointer user_data)
     }
 }
 
+/*
 static void on_window_closed(GtkWindow *window, gpointer user_data)
 {
     GUIState *state = user_data;
@@ -411,6 +412,24 @@ static void on_window_closed(GtkWindow *window, gpointer user_data)
     g_printerr("DEBUG: Quitting application from window close\n");
     g_application_quit(G_APPLICATION(gtk_window_get_application(window)));
 }
+*/
+
+static void on_window_closed(GtkWindow *window, gpointer user_data)
+{
+    (void) window;
+    GUIState *state = user_data;
+
+    if (state->is_streaming) {
+        audio_stop();
+    }
+
+    //Use stored app pointer, window's application is already NULL here
+    if (state->app != NULL) {
+        g_application_release(G_APPLICATION(state->app));
+        g_application_quit(G_APPLICATION(state->app));
+    }
+}
+
 
 
 //setup draw funcs and signal handlers
