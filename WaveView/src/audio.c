@@ -25,6 +25,7 @@ static AudioDeviceInfo device_list[MAX_DEVICES];
 static int device_count = 0;
 static int current_device_index = -1; //index into device_list
 static int is_running = 0;
+static int current_input_channels = NUM_CHANNELS;
 
 /* signal params and protection mutex */
 static SignalParams current_params = {
@@ -88,9 +89,10 @@ static int audio_callback(const void *input, void *output, unsigned long frameCo
 
     float *out = output;
 
-    /* 1. process input */
+    /* 1. Write interleaved mic samples to ring buffer */
     if (input != NULL) {
-        ring_buffer_write(rb, input, (int) frameCount);
+        const int samples = (int)(frameCount * current_input_channels);
+        ring_buffer_write(rb, input, samples);
     }
 
     /* 2. generate output */
@@ -170,114 +172,99 @@ static int find_default_device_index(void) {
 }
 
 /**
+ * Attempt to open the full-duplex stream with given device/channel configuration.
+ * @return 0 on success, -1 on failure (stream set to NULL).
+ */
+static int try_open_stream(int in_dev, int out_dev, int in_channels) {
+    PaStreamParameters in_params, out_params;
+    const PaDeviceInfo *in_info = Pa_GetDeviceInfo(in_dev);
+    const PaDeviceInfo *out_info = Pa_GetDeviceInfo(out_dev);
+
+    if (!in_info || !out_info) return -1;
+
+    in_params.device = in_dev;
+    in_params.channelCount = in_channels;
+    in_params.sampleFormat = paFloat32;
+    in_params.suggestedLatency = in_info->defaultLowInputLatency;
+    in_params.hostApiSpecificStreamInfo = NULL;
+
+    out_params.device = out_dev;
+    out_params.channelCount = 1;     //Mono speaker
+    out_params.sampleFormat = paFloat32;
+    out_params.suggestedLatency = out_info->defaultLowOutputLatency;
+    out_params.hostApiSpecificStreamInfo = NULL;
+
+    PaError err = Pa_OpenStream(&stream,
+        &in_params,
+        &out_params,
+        SAMPLE_RATE,
+        FRAMES_PER_BUFFER,
+        paClipOff,
+        audio_callback,
+        global_rb
+        );
+    if (err == paNoError) {
+        current_input_channels = in_channels;
+        return 0;
+    }
+
+    stream = NULL;
+    return -1;
+}
+
+
+/**
  *Stream opening, FULL-DUPLEX
  *function to open the stream with the current device.
  */
-static int open_stream(void) {
-    PaError err;
-    PaStreamParameters inputParams, outputParams;
-
-    if (current_device_index < 0 || current_device_index >=device_count) {
-        fprintf(stderr, "audio: No valid device selected\n");
+static int open_stream(void)
+{
+    if (current_device_index < 0 || current_device_index >= device_count) {
+        fprintf(stderr, "audio: No valid input device selected.\n");
         return -1;
     }
 
     int in_dev = device_list[current_device_index].index;
     const PaDeviceInfo *in_info = Pa_GetDeviceInfo(in_dev);
-
     if (in_info == NULL) {
         fprintf(stderr, "audio: Failed to get input device info.\n");
         return -1;
     }
 
-    //input params (mic)
-    inputParams.device = in_dev;
-    inputParams.channelCount = 1; //mono for now
-    inputParams.sampleFormat = paFloat32;
-    inputParams.suggestedLatency = in_info->defaultLowInputLatency;
-    inputParams.hostApiSpecificStreamInfo = NULL;
-
-    //output params (speaker)
     PaDeviceIndex out_dev = Pa_GetDefaultOutputDevice();
     if (out_dev == paNoDevice) {
         fprintf(stderr, "audio: No default output device found.\n");
         return -1;
     }
-    const PaDeviceInfo *out_info = Pa_GetDeviceInfo(out_dev);
-    if (out_info == NULL) {
-        fprintf(stderr, "audio: Failed to get output device info.\n");
-        return -1;
+
+    /* Determine safe channel count (device may not support full stereo) */
+    int safe_channels = NUM_CHANNELS;
+    if (in_info->maxInputChannels < safe_channels) {
+        printf("audio: Device '%s' supports only %d input channel(s).\n",
+               in_info->name, in_info->maxInputChannels);
+        safe_channels = in_info->maxInputChannels;
     }
 
-    outputParams.device = out_dev;
-    outputParams.channelCount = 1; //mono output always
-    outputParams.sampleFormat = paFloat32;
-    outputParams.suggestedLatency = out_info->defaultLowOutputLatency;
-    outputParams.hostApiSpecificStreamInfo = NULL;
+    /* Attempt 1: open with safe channel count */
+    if (try_open_stream(in_dev, out_dev, safe_channels) == 0) {
+        printf("audio: Full-duplex stream opened: input=%s (%d ch), output=default (1 ch)\n",
+               in_info->name, current_input_channels);
+        return 0;
+    }
 
-    //open full-duplex stream
-    err = Pa_OpenStream(
-        &stream,
-        &inputParams,
-        &outputParams,
-        SAMPLE_RATE,
-        FRAMES_PER_BUFFER,
-        paClipOff,
-        audio_callback,
-        global_rb);
-
-    //if opening fails and it's a hardware device, fall back to default
-    if (err != paNoError) {
-        fprintf(stderr, "audio: Pa_OpenStream error: %s\n", Pa_GetErrorText(err));
-
-        //check if we're using a hw:* device
-        if (strstr(in_info->name, "hw:") != NULL) {
-            fprintf(stderr, "audio: Hardware device failed. Falling back to 'default'.\n");
-
-            //find 'default' device in the list
-            int default_idx = -1;
-            for (int i = 0; i < device_count; i++) {
-                if (strstr(device_list[i].name, "default") != NULL) {
-                    default_idx = i;
-                    break;
-                }
-            }
-
-            //TODO: Auto select SAEC_DAQ audio device when connected
-
-            if (default_idx >= 0) {
-                current_device_index = default_idx;
-                in_dev = device_list[default_idx].index;
-                inputParams.device = in_dev;
-
-                const PaDeviceInfo *def_info = Pa_GetDeviceInfo(in_dev);
-                if (def_info) {
-                    inputParams.suggestedLatency = def_info->defaultLowInputLatency;
-                }
-
-                err = Pa_OpenStream(&stream,
-                                    &inputParams,
-                                    &outputParams,
-                                    SAMPLE_RATE,
-                                    FRAMES_PER_BUFFER,
-                                    paClipOff,
-                                    audio_callback,
-                                    global_rb
-                );
-            }
-        }
-
-        if (err != paNoError) {
-            fprintf(stderr, "audio: Pa_Openstream fallback also failed: %s\n", Pa_GetErrorText(err));
-            stream = NULL;
-            return -1;
+    /* Attempt 2: if stereo failed, retry with mono */
+    if (safe_channels > 1) {
+        printf("audio: Multi-channel open failed. Retrying with mono...\n");
+        if (try_open_stream(in_dev, out_dev, 1) == 0) {
+            printf("audio: Full-duplex stream opened: input=%s (1 ch), output=default (1 ch)\n",
+                   in_info->name);
+            return 0;
         }
     }
 
-    printf("audio: Full-duplex stream opened: input=%s, output=%s\n", in_info->name, out_info->name);
-    return 0;
+    fprintf(stderr, "audio: Failed to open stream with device '%s'.\n", in_info->name);
+    return -1;
 }
-
 
 int audio_init(RingBuffer *rb) {
     PaError err;
@@ -364,6 +351,10 @@ int audio_get_signal_params(SignalParams *params) {
 
 int audio_get_device_count(void) {
     return device_count;
+}
+
+int audio_get_input_channels(void) {
+    return current_input_channels;
 }
 
 const AudioDeviceInfo* audio_get_device_info(int index) {

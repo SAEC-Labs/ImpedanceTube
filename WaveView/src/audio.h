@@ -3,7 +3,7 @@
 //
 
 /*
- * Audio capture interface, using the built-in mic, using PortAudio. samples are delivered via a callback and
+ * Audio capture interface, using STM32 DAQ (stereo mode), using PortAudio. samples are delivered via a callback and
  * written to the thread safe ring buffer
  */
 #ifndef WAVEVIEW_AUDIO_H
@@ -24,7 +24,7 @@ typedef struct {
 
 /**
  * Initialize the audio capture subsystem with full-duplex stream.
- * opens both default input (mic) and default output (speaker)
+ * opens both default input (STM32 DAQ) and default output (speaker)
  *
  * @param rb  Pointer to a ring buffer where audio samples will be written.
  *            Must be created and valid before calling this function.
@@ -109,5 +109,11 @@ const char* audio_get_device_name(void);
  * Safe to call multiple times.
  */
 void audio_terminate(void);
+
+/**
+ * Get the number of input channels currently being captured.
+ * @return 1 for mono, 2 for stereo.
+ */
+int audio_get_input_channels(void);
 
 #endif //WAVEVIEW_AUDIO_H
