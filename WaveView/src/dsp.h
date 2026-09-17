@@ -12,8 +12,6 @@
 #ifndef WAVEVIEW_DSP_H
 #define WAVEVIEW_DSP_H
 
-#include <stdint.h>
-
 /**
  * Compute the magnitude spectrum of a time-domain signal.
  *

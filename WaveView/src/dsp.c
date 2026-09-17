@@ -43,7 +43,7 @@ void compute_spectrum(const float *time_data, float *magnitude, int fft_size) {
     }
 
     //copy input data as we need mutable buffer for windowing
-    float *windowed_data = (float*) malloc(fft_size * sizeof(float));
+    float *windowed_data = malloc(fft_size * sizeof(float));
     if (!windowed_data) {
         //memory allocation failed
         kiss_fftr_free(cfg);
@@ -57,7 +57,7 @@ void compute_spectrum(const float *time_data, float *magnitude, int fft_size) {
     apply_hann_window(windowed_data, fft_size);
 
     //output buffer for FFT (complex values)
-    kiss_fft_cpx * freq_data = (kiss_fft_cpx*) malloc((fft_size / 2 + 1) * sizeof(kiss_fft_cpx));
+    kiss_fft_cpx * freq_data = malloc((fft_size / 2 + 1) * sizeof(kiss_fft_cpx));
 
     if (freq_data == NULL) {
         //memory alloc failed
