@@ -1,4 +1,4 @@
-# WaveView - GUI software for the Impedance Test Tube
+# WaveView - GUI software for the Acoustic Impedance Test Tube
 WaveView is a pure‑C, cross‑platform application for real‑time audio capture, waveform visualization, and FFT‑based spectrum analysis. It uses:
 - **PortAudio** for low‑latency audio I/O (ALSA on Linux, ASIO/WASAPI on Windows)
 - **KissFFT** for fast real‑time FFT
@@ -8,39 +8,41 @@ It is designed as the software frontend for the acoustic impedance tube project,
 
 ## Implemeted Features
 
-- 🎤 Real‑time microphone capture (default input device)
-- 📈 Live waveform display (time domain)
-- 📊 Live FFT spectrum display (frequency domain)
+- 🎤 Real‑time microphone capture (default input device & Two-channel SAEC_DAQ)
+- 📈 Live waveform displays (time domain)
+- 📊 Live FFT spectrum displays (frequency domain)
 - 🔄 Thread‑safe, lock‑free ring buffer for sample transfer
-- 🧩 Modular C architecture (audio, DSP, GUI, ring buffer)
+- 🧩 Modular C architecture (for audio, DSP, GUI, ring buffer)
 - 🐧 Works on Linux (ALSA) and Windows (ASIO/WASAPI)
 - 🖲️ Start/Stop stream control
-- 📟️ Device selection to choose input device from dropdown
+- 📟️ Device selection to choose input device from dropdown (auto selects SAEC_DAQ)
 - 🔊️ Excitation signal generator with freq range and amplitude sliders: 
    1. sine wave ☑️
   2. linear sweep ☑️
   3. white noise (future)
   4. pink noise (future)
   5. brownian noise (future)
-  6. logarithmic sweep (next, because it's awesome 😂️😍️)
+  6. logarithmic sweep (next)
 - **Dark/Light theme toggle** – for comfortable viewing (activated based on System setting)
+- **STM32 USB Audio support** – replaces PC mic stream with custom SAEC_DAQ streams.
 
-<img width="913" height="652" alt="v0 2" src="https://github.com/user-attachments/assets/0ccbcbde-f991-40ef-ab95-bcc3868ef6a3" />
 
+![v0.3.0.png](v0.3.0.png)
+        (_**snip: two channel full-duplex stream; sine wave at 440Hz**_)
   
 ## Planned Features
 
 ### 🖥️ GUI Enhancements
 
-- **Multi‑tab display** – separate tabs for waveform, spectrum, transfer function, absorption coefficient plots.
+- **Multi‑tab display** – separate tabs for waveform, spectrum, transfer function, absorption coefficient plots. (and axes)
 - **Peak frequency marker** – click‑to‑measure dominant frequency
-- **Data logging** – save raw WAV files, CSV with timestamps, and JSON metadata (sample info, environment)
-- **Export plots** – save waveform/spectrum as PNG
+- **Data logging** – save raw WAV files, CSV with timestamps, and JSON metadata (sample info)
+- **Export plots** – save waveforms/spectrums as PNG
 
 
 ### 📊 Heavy DSP Backend
 
-- **Two‑channel (stereo) and four channel input processing**
+- **Two‑channel (stereo) and four channel input signal processing**
 - **Cross‑spectrum & auto‑spectrum** – `S12`, `S11`, `S22` with averaging
 - **Transfer function** – `H12 = S12 / S11`
 - **Reflection coefficient** – `R` (complex)
@@ -50,10 +52,7 @@ It is designed as the software frontend for the acoustic impedance tube project,
 - **Frequency‑dependent uncertainty** – confidence intervals based on coherence
 
 ### 🔌 Hardware Integration
-
-- **STM32 USB Audio support** – replace PC mic stream with custom STM32 DAQ streams.
 - **Simultaneous 4‑channel capture** – for full four‑microphone transmission loss measurements
-- **Auto‑detection of USB audio interfaces** – plug‑and‑play support
 
 ## Dependencies
 
@@ -104,20 +103,30 @@ This method builds a native Windows executable inside the MSYS2 UCRT64 environme
 4. **Run the `.exe` file**
 
 ## Usage
-1. Plug in a microphone (or use the built‑in one). Best experience if you have AUX headphones 🎧️
+1. Plug in a microphone (or use the built‑in one) or Plug in the in-house custom STM32 SAEC_DAQ
 2. Launch the software, preferrably via terminal to see stdout and stderr. Click the Start/Stop button.
-3. Open the signal generator dropdown to generate a signal, will play on your inbuilt speaker or plugged in headphones. Adjust amplitude and duration.
-4. Speak, whistle, or make noise, the waveform and FFT spectrum update live as your speaker outputs the generating signal.
+3. Open the signal generator dropdown to generate a signal, will play on your inbuilt speaker or plugged in headphones.
+    Adjust amplitude and duration and freq ranges for chirps.
+4. Speak, whistle, or make noise, the waveforms and FFT spectrums update live as your speaker outputs the generating signal.
 5. Close the window or press Ctrl+C to exit.
 
-## Known Issues
-1. Selecting and working with the hardware device `(hw:*)` on Linux from the dropdown sometimes hangs the stream. 
-   This is a direct driver initialization error and will be fixed. 
+## Known Issues (_features_)
+1. **Mono** mode on Linux shows two streams (two waveforms & two FFT spectra). This is due to the default PulseAudio
+   device that reports two channels even though the pc mic is physically mono, our the detection implemented is rather too fragile, making PulseAudio lock us in **Stereo** mode.
+   RMS-based detection could resolve this.
+2. Noticeable high CPU usage (~37% on Intel Core i5-5200U CPU @ 2.2GHz * 4). The root cause is in the
+   `dsp.c`- every call to `compute_spectrum()` which:
+- Allocates a new KissFFT config (`kiss_fftr_alloc`)
+- Allocates 2 working buffers
+- Recomputes the Hann window from scratch (`cosf` per sample)
+- Frees everything
+- Called 2× per 50ms -> 40 full FFT setups per second, causing the CPU hog.
 
-**Quick fix**: Make sure to select the `default` device.
+**Fix**: Pre-allocate FFT config, working buffers, and Hann window only once, then reuse.
+ 
 
 ## Authors & Credits
-1. **The awesome SAEC Team** – Bsc. Mechatronics Engineering students, DeKUT
+1. **The awesome SAEC Team** – Bsc. Mechatronic Engineering students, DeKUT
 2. **KissFFT** – Mark Borgerding (public domain / BSD)
 3. **PortAudio** – PortAudio community (MIT)
 4. **GTK** – The GTK team (LGPL)
