@@ -3,9 +3,9 @@
     <requires lib="gtk" version="4.0"/>
 
     <object class="GtkApplicationWindow" id="main_window">
-        <property name="title">WaveView – RealTime Signal Viewer &amp; Analyzer</property>
-        <property name="default-width">900</property>
-        <property name="default-height">700</property>
+        <property name="title">WaveView – SAEC RealTime Signal Viewer &amp; Analyzer</property>
+        <property name="default-width">1200</property>
+        <property name="default-height">800</property>
         <property name="resizable">True</property>
         <child>
             <object class="GtkBox" id="main_vbox">
@@ -16,42 +16,35 @@
                 <property name="margin-top">5</property>
                 <property name="margin-bottom">5</property>
 
-                <!-- Control Bar (Order: Signal → Device → Start) -->
+                <!-- Control Bar -->
                 <child>
                     <object class="GtkBox" id="control_box">
                         <property name="orientation">horizontal</property>
                         <property name="spacing">10</property>
                         <property name="halign">fill</property>
 
-                        <!-- Signal Type Label -->
                         <child>
                             <object class="GtkLabel" id="signal_type_label">
                                 <property name="label">Signal:</property>
                             </object>
                         </child>
-
-                        <!-- Signal Type Dropdown -->
                         <child>
                             <object class="GtkDropDown" id="signal_type_combo">
                                 <property name="hexpand">True</property>
                             </object>
                         </child>
 
-                        <!-- Device Label -->
                         <child>
                             <object class="GtkLabel" id="device_label">
                                 <property name="label">Device:</property>
                             </object>
                         </child>
-
-                        <!-- Device Dropdown -->
                         <child>
                             <object class="GtkDropDown" id="device_combo">
                                 <property name="hexpand">True</property>
                             </object>
                         </child>
 
-                        <!-- Start/Stop Button -->
                         <child>
                             <object class="GtkToggleButton" id="start_stop_button">
                                 <property name="label">Start</property>
@@ -61,30 +54,103 @@
                     </object>
                 </child>
 
-                <!-- Title Label -->
+                <!-- Waveform Row: Two side-by-side plots -->
                 <child>
-                    <object class="GtkLabel" id="title_label">
-                        <property name="label">🎤 Live Microphone Streams</property>
-                        <property name="halign">center</property>
-                        <property name="vexpand">False</property>
+                    <object class="GtkBox" id="waveform_row">
+                        <property name="orientation">horizontal</property>
+                        <property name="spacing">5</property>
+                        <property name="homogeneous">True</property>
+                        <property name="vexpand">True</property>
+
+                        <child>
+                            <object class="GtkBox" id="waveform_col1">
+                                <property name="orientation">vertical</property>
+                                <property name="spacing">2</property>
+                                <child>
+                                    <object class="GtkLabel" id="waveform_label_ch1">
+                                        <property name="label">Mic 1 – Time Domain</property>
+                                        <property name="halign">center</property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="GtkDrawingArea" id="waveform_area_ch1">
+                                        <property name="hexpand">True</property>
+                                        <property name="vexpand">True</property>
+                                        <property name="height-request">220</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+
+                        <child>
+                            <object class="GtkBox" id="waveform_col2">
+                                <property name="orientation">vertical</property>
+                                <property name="spacing">2</property>
+                                <child>
+                                    <object class="GtkLabel" id="waveform_label_ch2">
+                                        <property name="label">Mic 2 – Time Domain</property>
+                                        <property name="halign">center</property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="GtkDrawingArea" id="waveform_area_ch2">
+                                        <property name="hexpand">True</property>
+                                        <property name="vexpand">True</property>
+                                        <property name="height-request">220</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
                     </object>
                 </child>
 
-                <!-- Waveform Drawing Area -->
+                <!-- Spectrum Row: Two side-by-side plots -->
                 <child>
-                    <object class="GtkDrawingArea" id="waveform_area">
-                        <property name="hexpand">True</property>
+                    <object class="GtkBox" id="spectrum_row">
+                        <property name="orientation">horizontal</property>
+                        <property name="spacing">5</property>
+                        <property name="homogeneous">True</property>
                         <property name="vexpand">True</property>
-                        <property name="height-request">250</property>
-                    </object>
-                </child>
 
-                <!-- Spectrum Drawing Area -->
-                <child>
-                    <object class="GtkDrawingArea" id="spectrum_area">
-                        <property name="hexpand">True</property>
-                        <property name="vexpand">True</property>
-                        <property name="height-request">250</property>
+                        <child>
+                            <object class="GtkBox" id="spectrum_col1">
+                                <property name="orientation">vertical</property>
+                                <property name="spacing">2</property>
+                                <child>
+                                    <object class="GtkLabel" id="spectrum_label_ch1">
+                                        <property name="label">Mic 1 – Spectrum (FFT)</property>
+                                        <property name="halign">center</property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="GtkDrawingArea" id="spectrum_area_ch1">
+                                        <property name="hexpand">True</property>
+                                        <property name="vexpand">True</property>
+                                        <property name="height-request">220</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+
+                        <child>
+                            <object class="GtkBox" id="spectrum_col2">
+                                <property name="orientation">vertical</property>
+                                <property name="spacing">2</property>
+                                <child>
+                                    <object class="GtkLabel" id="spectrum_label_ch2">
+                                        <property name="label">Mic 2 – Spectrum (FFT)</property>
+                                        <property name="halign">center</property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="GtkDrawingArea" id="spectrum_area_ch2">
+                                        <property name="hexpand">True</property>
+                                        <property name="vexpand">True</property>
+                                        <property name="height-request">220</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
                     </object>
                 </child>
 
@@ -117,7 +183,6 @@
         <property name="default-width">450</property>
         <property name="default-height">400</property>
         <property name="resizable">False</property>
-        <!-- <property name="use-header-bar">0</property>    show action buttons -->
 
         <child>
             <object class="GtkBox" id="dialog_vbox">
@@ -128,7 +193,6 @@
                 <property name="margin-top">15</property>
                 <property name="margin-bottom">15</property>
 
-                <!-- Signal Type Label (inside dialog) -->
                 <child>
                     <object class="GtkLabel" id="dialog_signal_type_label">
                         <property name="label">Signal Type: Sine Wave</property>
@@ -136,7 +200,6 @@
                     </object>
                 </child>
 
-                <!-- Separator -->
                 <child>
                     <object class="GtkSeparator" id="dialog_separator">
                         <property name="orientation">horizontal</property>
@@ -349,14 +412,14 @@
                     </object>
                 </child>
 
-                <!-- seperator -->
+                <!-- Separator above buttons -->
                 <child>
                     <object class="GtkSeparator" id="dialog_button_separator">
                         <property name="orientation">horizontal</property>
                     </object>
                 </child>
 
-                <!-- Button Box: horizontal container for buttons -->
+                <!-- Button Box -->
                 <child>
                     <object class="GtkBox" id="dialog_button_box">
                         <property name="orientation">horizontal</property>
@@ -364,21 +427,17 @@
                         <property name="halign">end</property>
                         <property name="margin-top">10</property>
 
-                        <!-- Cancel button -->
                         <child>
                             <object class="GtkButton" id="dialog_cancel_button">
                                 <property name="label">Cancel</property>
                                 <property name="visible">True</property>
-                                <property name="halign">center</property>
                             </object>
                         </child>
 
-                        <!-- generate button -->
                         <child>
                             <object class="GtkButton" id="dialog_generate_button">
                                 <property name="label">Generate</property>
                                 <property name="visible">True</property>
-                                <property name="halign">center</property>
                             </object>
                         </child>
                     </object>

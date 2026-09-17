@@ -15,10 +15,8 @@
 #include "signals/sine_wave.h"
 #include "signals/linear_sweep.h"
 
-
-
-//static ( private to this file )
 #define MAX_DEVICES 32
+
 static PaStream *stream = NULL; //portaudio stream handle
 static RingBuffer *global_rb = NULL; //ring buffer passed from audio_init
 static AudioDeviceInfo device_list[MAX_DEVICES];
@@ -154,19 +152,26 @@ static int enumerate_devices(void) {
 }
 
 /**
- * Find the default input device index in our device_list.
+ * Find the default input device index in our device_list
+ * Auto select "SAEC_DAQ" when connected
  * Returns -1 if not found.
  */
-static int find_default_device_index(void) {
-    PaDeviceIndex default_idx = Pa_GetDefaultInputDevice();
-    if (default_idx == paNoDevice) {
-        return -1;
-    }
-
+static int find_default_device_index(void)
+{
+    //priority 1: Custom SAEC_DAQ (STM32) device
     for (int i = 0; i < device_count; i++) {
-        if (device_list[i].index == default_idx) {
+        if (strstr(device_list[i].name, "SAEC_DAQ") != NULL) {
+            printf("audio: Found SAEC_DAQ device: %s\n", device_list[i].name);
             return i;
         }
+    }
+
+    //fallback to system default input device
+    PaDeviceIndex default_idx = Pa_GetDefaultInputDevice();
+    if (default_idx == paNoDevice) return -1;
+
+    for (int i = 0; i < device_count; i++) {
+        if (device_list[i].index == default_idx) return i;
     }
     return -1;
 }
