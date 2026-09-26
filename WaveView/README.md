@@ -17,12 +17,12 @@ It is designed as the software frontend for the acoustic impedance tube project,
 - 🖲️ Start/Stop stream control
 - 📟️ Device selection to choose input device from dropdown (auto selects SAEC_DAQ)
 - 🔊️ Excitation signal generator with freq range and amplitude sliders: 
-   1. sine wave ☑️
+   1. sine wave   ☑️
   2. linear sweep ☑️
-  3. white noise (future)
-  4. pink noise (future)
-  5. brownian noise (future)
-  6. logarithmic sweep (next)
+  3. white noise  ☑️
+  4. pink noise   ☑️
+  5. logarithmic sweep ☑️
+  6. Brownian noise (future)
 - **Dark/Light theme toggle** – for comfortable viewing (activated based on System setting)
 - **STM32 USB Audio support** – replaces PC mic stream with custom SAEC_DAQ streams.
 
@@ -103,7 +103,7 @@ This method builds a native Windows executable inside the MSYS2 UCRT64 environme
 4. **Run the `.exe` file**
 
 ## Usage
-1. Plug in a microphone (or use the built‑in one) or Plug in the in-house custom STM32 SAEC_DAQ
+1. Plug in a microphone to PC(or use the built‑in one) or Plug in the in-house custom STM32 SAEC_DAQ
 2. Launch the software, preferrably via terminal to see stdout and stderr. Click the Start/Stop button.
 3. Open the signal generator dropdown to generate a signal, will play on your inbuilt speaker or plugged in headphones.
     Adjust amplitude and duration and freq ranges for chirps.
@@ -114,15 +114,7 @@ This method builds a native Windows executable inside the MSYS2 UCRT64 environme
 1. **Mono** mode on Linux shows two streams (two waveforms & two FFT spectra). This is due to the default PulseAudio
    device that reports two channels even though the pc mic is physically mono, our the detection implemented is rather too fragile, making PulseAudio lock us in **Stereo** mode.
    RMS-based detection could resolve this.
-2. Noticeable high CPU usage (~37% on Intel Core i5-5200U CPU @ 2.2GHz * 4). The root cause is in the
-   `dsp.c`- every call to `compute_spectrum()` which:
-- Allocates a new KissFFT config (`kiss_fftr_alloc`)
-- Allocates 2 working buffers
-- Recomputes the Hann window from scratch (`cosf` per sample)
-- Frees everything
-- Called 2× per 50ms -> 40 full FFT setups per second, causing the CPU hog.
 
-**Fix**: Pre-allocate FFT config, working buffers, and Hann window only once, then reuse.
  
 
 ## Authors & Credits
