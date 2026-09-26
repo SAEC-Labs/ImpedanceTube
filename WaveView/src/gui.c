@@ -12,6 +12,7 @@
 #include <gtk/gtk.h>
 #include <cairo.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <math.h>
 
@@ -88,7 +89,7 @@ static void apply_channel_mode(GUIState *state)
 static void refresh_status(GUIState *state)
 {
     static const char *type_names[] = {
-        "Sine", "Linear Sweep", "Log Sweep",
+        "Sine", "Linear Sweep", "Logarithmic Sweep",
         "White Noise", "Pink Noise", "Brownian Noise"
     };
 
@@ -119,7 +120,7 @@ static void update_dialog_visibility(GUIState *state)
     const char *type_names[] = {
         "Sine Wave",
         "Linear Sweep",
-        "Log Sweep (Future)",
+        "Logarithmic Sweep",
         "White Noise (Future)",
         "Pink Noise (Future)",
         "Brownian Noise (Future)"
@@ -138,8 +139,8 @@ static void update_dialog_visibility(GUIState *state)
     GtkWidget *future_box = GTK_WIDGET(gtk_builder_get_object(state->builder, "future_params_box"));
 
     gtk_widget_set_visible(sine_box, (selected == 0));
-    gtk_widget_set_visible(sweep_box, (selected == 1));
-    gtk_widget_set_visible(future_box, (selected >= 2));
+    gtk_widget_set_visible(sweep_box, (selected == 1 || selected == 2)); //linear sweep & log sweep share same params box
+    gtk_widget_set_visible(future_box, (selected >= 3));
 }
 
 static void show_signal_dialog(GUIState *state)
@@ -183,6 +184,9 @@ static void on_dialog_generate(const GtkButton *button, const gpointer user_data
     GtkBuilder *builder = state->builder;
     guint signal_type = gtk_drop_down_get_selected(GTK_DROP_DOWN(state->signal_type_combo));
 
+    //DEBUG PRINT 4
+    fprintf(stderr, "[GUI_GEN] signal_type=%u (0=sine,1=lin,2=log)\n", signal_type);
+
     state->signal_params.type = (SignalType) signal_type;
     state->signal_params.is_active = 1;
 
@@ -190,6 +194,7 @@ static void on_dialog_generate(const GtkButton *button, const gpointer user_data
         case SIGNAL_SINE: {
             GtkSpinButton *freq_spin = GTK_SPIN_BUTTON(gtk_builder_get_object(builder, "sine_freq_spin"));
             GtkScale *amp_scale = GTK_SCALE(gtk_builder_get_object(builder, "sine_amp_scale"));
+
             state->signal_params.frequency = gtk_spin_button_get_value(freq_spin);
             state->signal_params.amplitude = gtk_range_get_value(GTK_RANGE(amp_scale));
             break;
@@ -199,10 +204,30 @@ static void on_dialog_generate(const GtkButton *button, const gpointer user_data
             GtkSpinButton *end_spin = GTK_SPIN_BUTTON(gtk_builder_get_object(builder, "sweep_end_spin"));
             GtkSpinButton *duration_spin = GTK_SPIN_BUTTON(gtk_builder_get_object(builder, "sweep_duration_spin"));
             GtkScale *amp_scale = GTK_SCALE(gtk_builder_get_object(builder, "sweep_amp_scale"));
+
             state->signal_params.frequency = gtk_spin_button_get_value(start_spin);
             state->signal_params.frequency_end = gtk_spin_button_get_value(end_spin);
             state->signal_params.sweep_duration = gtk_spin_button_get_value(duration_spin);
             state->signal_params.amplitude = gtk_range_get_value(GTK_RANGE(amp_scale));
+            break;
+        }
+        case SIGNAL_LOG_SWEEP: {
+            GtkSpinButton *start_spin    = GTK_SPIN_BUTTON(gtk_builder_get_object(builder, "sweep_start_spin"));
+            GtkSpinButton *end_spin      = GTK_SPIN_BUTTON(gtk_builder_get_object(builder, "sweep_end_spin"));
+            GtkSpinButton *duration_spin = GTK_SPIN_BUTTON(gtk_builder_get_object(builder, "sweep_duration_spin"));
+            GtkScale *amp_scale     = GTK_SCALE(gtk_builder_get_object(builder, "sweep_amp_scale"));
+
+            state->signal_params.frequency = gtk_spin_button_get_value(start_spin);
+            state->signal_params.frequency_end = gtk_spin_button_get_value(end_spin);
+            state->signal_params.sweep_duration = gtk_spin_button_get_value(duration_spin);
+            state->signal_params.amplitude = gtk_range_get_value(GTK_RANGE(amp_scale));
+
+            //DEBUG PRINT 5
+            fprintf(stderr, "[GUI_GEN] sweep f1=%.2f f2=%.2f dur=%.2f amp=%.2f\n",
+                    state->signal_params.frequency,
+                    state->signal_params.frequency_end,
+                    state->signal_params.sweep_duration,
+                    state->signal_params.amplitude);
             break;
         }
         default:
@@ -297,7 +322,7 @@ static void populate_signal_type_combo(GUIState *state)
     const char *signal_names[] = {
         "Sine Wave",
         "Linear Sweep",
-        "Log Sweep (Future)",
+        "Logarithmic Sweep",
         "White Noise (Future)",
         "Pink Noise (Future)",
         "Brownian Noise (Future)"

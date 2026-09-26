@@ -32,6 +32,8 @@ add_executable(WaveView main.c
         src/signals/signals.h
         src/signals/linear_sweep.c
         src/signals/linear_sweep.h
+        src/signals/log_sweep.c
+        src/signals/log_sweep.h
 )
 
 # Link the libs

@@ -14,6 +14,7 @@
 //signal generator headers
 #include "signals/sine_wave.h"
 #include "signals/linear_sweep.h"
+#include "signals/log_sweep.h"
 
 #define MAX_DEVICES 32
 
@@ -45,7 +46,7 @@ static int is_pulse_device(const char *name) {
 }
 
 /* signal generator */
-static float generate_signal_sample(const SignalParams *params, uint64_t sample_index) {
+static float generate_signal_sample(const SignalParams *params, const uint64_t sample_index) {
     if (!params->is_active) {
         return 0.0f;
     }
@@ -55,6 +56,14 @@ static float generate_signal_sample(const SignalParams *params, uint64_t sample_
             return sine_wave_generate_sample(sample_index);
         case SIGNAL_LINEAR_SWEEP:
             return linear_sweep_generate_sample(sample_index);
+        case SIGNAL_LOG_SWEEP:
+            const float s = logsweep_generate_sample(sample_index);
+            static int counter = 0;
+            if (counter < 5) {
+                fprintf(stderr, "LOG Sweep sample[%d] = %.4f\n", counter++, s);
+            }
+            return s;
+           // return logsweep_generate_sample(sample_index);
         default:
             return 0.0f; //other types not yet implemented
     }
@@ -325,6 +334,12 @@ int audio_update_signal_params(const SignalParams *params) {
     current_params = *params;
     current_params.sample_rate = SAMPLE_RATE;
 
+    //DEBUG PRINT 6, confirm type reaching audio layer
+    fprintf(stderr, "[AUDIO_UPDATE] type=%d active=%d f1=%.2f f2=%.2f fs=%u\n",
+            current_params.type, current_params.is_active,
+            current_params.frequency, current_params.frequency_end,
+            current_params.sample_rate);
+
     //init the selected signal generator
     if (current_params.is_active) {
         switch (current_params.type) {
@@ -333,6 +348,9 @@ int audio_update_signal_params(const SignalParams *params) {
                 break;
             case SIGNAL_LINEAR_SWEEP:
                 linear_sweep_init(&current_params);
+                break;
+            case SIGNAL_LOG_SWEEP:
+                logsweep_init(&current_params);
                 break;
             default:
                 //other types: do nothing yet
