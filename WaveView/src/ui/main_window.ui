@@ -396,6 +396,45 @@
                     </object>
                 </child>
 
+                <!-- Noise Parameters Box (Amplitude only) -->
+                <child>
+                    <object class="GtkBox" id="noise_params_box">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">8</property>
+                        <property name="visible">False</property>
+
+                        <child>
+                            <object class="GtkBox" id="noise_amp_box">
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">10</property>
+                                <child>
+                                    <object class="GtkLabel" id="noise_amp_label">
+                                        <property name="label">Amplitude:</property>
+                                        <property name="halign">start</property>
+                                        <property name="hexpand">True</property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="GtkScale" id="noise_amp_scale">
+                                        <property name="adjustment">
+                                            <object class="GtkAdjustment">
+                                                <property name="lower">0.0</property>
+                                                <property name="upper">1.0</property>
+                                                <property name="step-increment">0.01</property>
+                                                <property name="page-increment">0.1</property>
+                                                <property name="value">0.5</property>
+                                            </object>
+                                        </property>
+                                        <property name="digits">2</property>
+                                        <property name="width-request">200</property>
+                                        <property name="value-pos">right</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+
                 <!-- Future Signals Placeholder -->
                 <child>
                     <object class="GtkBox" id="future_params_box">

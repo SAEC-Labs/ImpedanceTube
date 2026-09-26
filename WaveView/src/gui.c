@@ -121,8 +121,8 @@ static void update_dialog_visibility(GUIState *state)
         "Sine Wave",
         "Linear Sweep",
         "Logarithmic Sweep",
-        "White Noise (Future)",
-        "Pink Noise (Future)",
+        "White Noise",
+        "Pink Noise",
         "Brownian Noise (Future)"
     };
 
@@ -136,11 +136,13 @@ static void update_dialog_visibility(GUIState *state)
     //show/hide params boxes
     GtkWidget *sine_box = GTK_WIDGET(gtk_builder_get_object(state->builder, "sine_params_box"));
     GtkWidget *sweep_box = GTK_WIDGET(gtk_builder_get_object(state->builder, "sweep_params_box"));
+    GtkWidget *noise_box = GTK_WIDGET(gtk_builder_get_object(state->builder, "noise_params_box"));
     GtkWidget *future_box = GTK_WIDGET(gtk_builder_get_object(state->builder, "future_params_box"));
 
-    gtk_widget_set_visible(sine_box, (selected == 0));
-    gtk_widget_set_visible(sweep_box, (selected == 1 || selected == 2)); //linear sweep & log sweep share same params box
-    gtk_widget_set_visible(future_box, (selected >= 3));
+    gtk_widget_set_visible(sine_box, selected == 0);
+    gtk_widget_set_visible(sweep_box, selected == 1 || selected == 2); //linear sweep & log sweep share same params box
+    gtk_widget_set_visible(noise_box, selected == 3 || selected == 4);
+    gtk_widget_set_visible(future_box, selected == 5); //future brownian
 }
 
 static void show_signal_dialog(GUIState *state)
@@ -177,12 +179,12 @@ static gboolean on_dialog_closed(GtkWindow *dialog, gpointer user_data)
     return GDK_EVENT_STOP; //prevent default destruction
 }
 
-static void on_dialog_generate(const GtkButton *button, const gpointer user_data)
+static void on_dialog_generate(const GtkButton *button, gpointer user_data)
 {
     (void) button;
     GUIState *state = user_data;
     GtkBuilder *builder = state->builder;
-    guint signal_type = gtk_drop_down_get_selected(GTK_DROP_DOWN(state->signal_type_combo));
+    const guint signal_type = gtk_drop_down_get_selected(GTK_DROP_DOWN(state->signal_type_combo));
 
     //DEBUG PRINT 4
     fprintf(stderr, "[GUI_GEN] signal_type=%u (0=sine,1=lin,2=log)\n", signal_type);
@@ -230,6 +232,14 @@ static void on_dialog_generate(const GtkButton *button, const gpointer user_data
                     state->signal_params.amplitude);
             break;
         }
+        case SIGNAL_WHITE_NOISE:
+            GtkScale *white_amp_scale = GTK_SCALE(gtk_builder_get_object(builder, "noise_amp_scale"));
+            state->signal_params.amplitude = gtk_range_get_value(GTK_RANGE(white_amp_scale));
+            break;
+        case SIGNAL_PINK_NOISE:
+            GtkScale *pink_amp_scale = GTK_SCALE(gtk_builder_get_object(builder, "noise_amp_scale"));
+            state->signal_params.amplitude = gtk_range_get_value(GTK_RANGE(pink_amp_scale));
+            break;
         default:
             state->signal_params.is_active = 0;
             break;
@@ -323,8 +333,8 @@ static void populate_signal_type_combo(GUIState *state)
         "Sine Wave",
         "Linear Sweep",
         "Logarithmic Sweep",
-        "White Noise (Future)",
-        "Pink Noise (Future)",
+        "White Noise",
+        "Pink Noise",
         "Brownian Noise (Future)"
     };
 

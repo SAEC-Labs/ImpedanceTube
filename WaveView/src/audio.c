@@ -15,6 +15,8 @@
 #include "signals/sine_wave.h"
 #include "signals/linear_sweep.h"
 #include "signals/log_sweep.h"
+#include "signals//white_noise.h"
+#include "signals/pink_noise.h"
 
 #define MAX_DEVICES 32
 
@@ -64,6 +66,11 @@ static float generate_signal_sample(const SignalParams *params, const uint64_t s
             }
             return s;
            // return logsweep_generate_sample(sample_index);
+        case SIGNAL_WHITE_NOISE:
+            return white_noise_generate_sample(sample_index);
+        case SIGNAL_PINK_NOISE:
+            return pink_noise_generate_sample(sample_index);
+
         default:
             return 0.0f; //other types not yet implemented
     }
@@ -351,6 +358,12 @@ int audio_update_signal_params(const SignalParams *params) {
                 break;
             case SIGNAL_LOG_SWEEP:
                 logsweep_init(&current_params);
+                break;
+            case SIGNAL_WHITE_NOISE:
+                white_noise_init(&current_params);
+                break;
+            case SIGNAL_PINK_NOISE:
+                pink_noise_init(&current_params);
                 break;
             default:
                 //other types: do nothing yet
