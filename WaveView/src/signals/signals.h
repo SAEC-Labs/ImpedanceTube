@@ -13,9 +13,9 @@
 typedef enum {
     SIGNAL_SINE = 0,
     SIGNAL_LINEAR_SWEEP,
-    //SIGNAL_LOG_SWEEP,
-    //SIGNAL_WHITE_NOISE,
-    //SIGNAL_PINK_NOISE,
+    SIGNAL_LOG_SWEEP,
+    SIGNAL_WHITE_NOISE,
+    SIGNAL_PINK_NOISE,
     //SIGNAL_BROWNIAN_NOISE
 } SignalType;
 
@@ -59,5 +59,25 @@ void signal_reset(void);
  * Used internally for phase tracking.
  */
 uint64_t signal_get_sample_index(void);
+
+
+static inline uint64_t xorshift64(uint64_t *state) {
+    uint64_t x = *state;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    *state = x;
+    return x;
+}
+
+/**
+ * Return uniform float in [-1.0f, +1.0f).
+ * Uses 24 high bits (float has 24-bit mantissa precision)!!!
+ */
+static inline float uniform_signed(uint64_t *state) {
+    uint32_t u = (uint32_t) (xorshift64(state) >> 40); //top 24 bits
+
+    return  (float)u * (2.0f / 16777216.0f) - 1.0f;
+}
 
 #endif //WAVEVIEW_SIGNALS_H
