@@ -7,9 +7,15 @@
 
 #define SAMPLE_RATE 44100
 #define FRAMES_PER_BUFFER 256
-#define NUM_CHANNELS 1
+
+/* Stereo - set to 4 for future 4-mic array */
+#define NUM_CHANNELS 2
+
+/* ring buffer holds N seconds for the interleaved audio */
 #define RING_BUFFER_SECONDS 2
-#define RING_BUFFER_SIZE (SAMPLE_RATE * RING_BUFFER_SECONDS)
+
+/* total number of floats (frames # channels) */
+#define RING_BUFFER_SIZE (SAMPLE_RATE * RING_BUFFER_SECONDS * NUM_CHANNELS)
 
 #define FFT_SIZE 1024
 #define PLOT_POINTS 512

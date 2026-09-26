@@ -12,13 +12,11 @@
 #include <unistd.h> //for usleep
 
 //signal generator headers
-
 #include "signals/sine_wave.h"
 #include "signals/linear_sweep.h"
-
-
-
-//static ( private to this file )
+#include "signals/log_sweep.h"
+#include "signals//white_noise.h"
+#include "signals/pink_noise.h"
 
 #define MAX_DEVICES 32
 
@@ -28,12 +26,12 @@ static AudioDeviceInfo device_list[MAX_DEVICES];
 static int device_count = 0;
 static int current_device_index = -1; //index into device_list
 static int is_running = 0;
-//static char device_name[256] = "Unknown";
+static int current_input_channels = NUM_CHANNELS;
 
 /* signal params and protection mutex */
 static SignalParams current_params = {
     .type = SIGNAL_SINE,
-    .frequency = 440.0f,
+    .frequency = 432.0f,
     .frequency_end = 1000.0f,
     .amplitude = 0.5f,
     .sweep_duration = 5.0f,
@@ -43,14 +41,14 @@ static SignalParams current_params = {
 
 static pthread_mutex_t params_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-//check if device name contains "pulse"
+//check if device name contains "pulse" (for linux)
 static int is_pulse_device(const char *name) {
     if (name == NULL) return 0;
     return (strstr(name, "pulse") != NULL || strstr(name, "pulse") != NULL);
 }
 
 /* signal generator */
-static float generate_signal_sample(const SignalParams *params, uint64_t sample_index) {
+static float generate_signal_sample(const SignalParams *params, const uint64_t sample_index) {
     if (!params->is_active) {
         return 0.0f;
     }
@@ -60,6 +58,19 @@ static float generate_signal_sample(const SignalParams *params, uint64_t sample_
             return sine_wave_generate_sample(sample_index);
         case SIGNAL_LINEAR_SWEEP:
             return linear_sweep_generate_sample(sample_index);
+        case SIGNAL_LOG_SWEEP:
+            const float s = logsweep_generate_sample(sample_index);
+            static int counter = 0;
+            if (counter < 5) {
+                fprintf(stderr, "LOG Sweep sample[%d] = %.4f\n", counter++, s);
+            }
+            return s;
+           // return logsweep_generate_sample(sample_index);
+        case SIGNAL_WHITE_NOISE:
+            return white_noise_generate_sample(sample_index);
+        case SIGNAL_PINK_NOISE:
+            return pink_noise_generate_sample(sample_index);
+
         default:
             return 0.0f; //other types not yet implemented
     }
@@ -71,7 +82,7 @@ static float generate_signal_sample(const SignalParams *params, uint64_t sample_
 * Called automatically by PortAudio when audio data is available.
 *
 * @param input       Pointer to input buffer (microphone samples)
-* @param output      Pointer to output buffer (not used – we only capture)
+* @param output      Pointer to output buffer (used – we only capture and output too)
 * @param frameCount  Number of frames in this callback
 * @param timeInfo    Timing info (not used)
 * @param statusFlags PortAudio status flags (not used)
@@ -88,37 +99,26 @@ static int audio_callback(const void *input, void *output, unsigned long frameCo
     (void) statusFlags;
 
     //cast data passed through stream to our struct
-    RingBuffer *rb = (RingBuffer *) userData;
+    RingBuffer *rb = userData;
 
     float *out = output;
 
-    /*if input is NULL (maybe some audio device issue) do nothing
-    if (input == NULL) {
-        return paContinue;
-    }
-
-    //cast to float. we use paFloat32 type
-    const float *samples = (const float *) input;
-
-    //write samples to ring buffer
-    ring_buffer_write(rb, samples, (int) frameCount);
-
-    return paContinue; */
-
-    /* 1. process input */
+    /* 1. Write interleaved mic samples to ring buffer */
     if (input != NULL) {
-        ring_buffer_write(rb, (const float*) input, (int) frameCount);
+        const int samples = (int)(frameCount * current_input_channels);
+        ring_buffer_write(rb, input, samples);
     }
 
     /* 2. generate output */
     if (out != NULL) {
         //copy current signal params under mutex - quick lock
+
         SignalParams local_params;
         pthread_mutex_lock(&params_mutex);
         local_params = current_params;
         pthread_mutex_unlock(&params_mutex);
 
-        //get current sample index for sweep timing
+        //get current sample index for sweeps timing
         static uint64_t sample_counter = 0;
         uint64_t sample_index = sample_counter;
         sample_counter += frameCount;
@@ -126,11 +126,10 @@ static int audio_callback(const void *input, void *output, unsigned long frameCo
         if (local_params.is_active) {
             //generate samples using the signal generator
             for (unsigned long i = 0; i < frameCount; i++) {
-               // unsigned long sample_index = (unsigned long) Pa_GetStreamTime(stream) * SAMPLE_RATE + 1;
                 out[i] = generate_signal_sample(&local_params, sample_index + i);
             }
         } else {
-            //output silence
+            //output silence!
             for (unsigned long i = 0; i < frameCount; i++) {
                 out[i] = 0.0f;
             }
@@ -154,7 +153,7 @@ static int enumerate_devices(void) {
         if (info == NULL) continue;
         if (info->maxInputChannels <= 0) continue; //input only
 
-        //skip PulseAudio devices as may cause instability
+        //skip PulseAudio devices as may cause instability (on linux)
         if (is_pulse_device(info->name)) {
             continue;
         }
@@ -169,137 +168,127 @@ static int enumerate_devices(void) {
 }
 
 /**
- * Find the default input device index in our device_list.
+ * Find the default input device index in our device_list
+ * Auto select "SAEC_DAQ" when connected
  * Returns -1 if not found.
  */
-static int find_default_device_index(void) {
-    PaDeviceIndex default_idx = Pa_GetDefaultInputDevice();
-    if (default_idx == paNoDevice) {
-        return -1;
-    }
-
+static int find_default_device_index(void)
+{
+    //priority 1: Custom SAEC_DAQ (STM32) device
     for (int i = 0; i < device_count; i++) {
-        if (device_list[i].index == default_idx) {
+        if (strstr(device_list[i].name, "SAEC_DAQ") != NULL) {
+            printf("audio: Found SAEC_DAQ device: %s\n", device_list[i].name);
             return i;
         }
+    }
+
+    //fallback to system default input device
+    PaDeviceIndex default_idx = Pa_GetDefaultInputDevice();
+    if (default_idx == paNoDevice) return -1;
+
+    for (int i = 0; i < device_count; i++) {
+        if (device_list[i].index == default_idx) return i;
     }
     return -1;
 }
 
 /**
+ * Attempt to open the full-duplex stream with given device/channel configuration.
+ * @return 0 on success, -1 on failure (stream set to NULL).
+ */
+static int try_open_stream(int in_dev, int out_dev, int in_channels) {
+    PaStreamParameters in_params, out_params;
+    const PaDeviceInfo *in_info = Pa_GetDeviceInfo(in_dev);
+    const PaDeviceInfo *out_info = Pa_GetDeviceInfo(out_dev);
+
+    if (!in_info || !out_info) return -1;
+
+    in_params.device = in_dev;
+    in_params.channelCount = in_channels;
+    in_params.sampleFormat = paFloat32;
+    in_params.suggestedLatency = in_info->defaultLowInputLatency;
+    in_params.hostApiSpecificStreamInfo = NULL;
+
+    out_params.device = out_dev;
+    out_params.channelCount = 1;     //Mono speaker
+    out_params.sampleFormat = paFloat32;
+    out_params.suggestedLatency = out_info->defaultLowOutputLatency;
+    out_params.hostApiSpecificStreamInfo = NULL;
+
+    PaError err = Pa_OpenStream(&stream,
+        &in_params,
+        &out_params,
+        SAMPLE_RATE,
+        FRAMES_PER_BUFFER,
+        paClipOff,
+        audio_callback,
+        global_rb
+        );
+    if (err == paNoError) {
+        current_input_channels = in_channels;
+        return 0;
+    }
+
+    stream = NULL;
+    return -1;
+}
+
+
+/**
  *Stream opening, FULL-DUPLEX
  *function to open the stream with the current device.
  */
-static int open_stream(void) {
-    PaError err;
-    PaStreamParameters inputParams, outputParams;
-
-    if (current_device_index < 0 || current_device_index >=device_count) {
-        fprintf(stderr, "audio: No valid device selected\n");
+static int open_stream(void)
+{
+    if (current_device_index < 0 || current_device_index >= device_count) {
+        fprintf(stderr, "audio: No valid input device selected.\n");
         return -1;
     }
 
     int in_dev = device_list[current_device_index].index;
     const PaDeviceInfo *in_info = Pa_GetDeviceInfo(in_dev);
-
-   //int pa_device = device_list[current_device_index].index;
-    //const PaDeviceInfo *info = Pa_GetDeviceInfo(pa_device);
     if (in_info == NULL) {
         fprintf(stderr, "audio: Failed to get input device info.\n");
         return -1;
     }
 
-    //input params (mic)
-    inputParams.device = in_dev;
-    inputParams.channelCount = 1; //mono for now
-    inputParams.sampleFormat = paFloat32;
-    inputParams.suggestedLatency = in_info->defaultLowInputLatency;
-    inputParams.hostApiSpecificStreamInfo = NULL;
-
-    //output params (speaker)
     PaDeviceIndex out_dev = Pa_GetDefaultOutputDevice();
     if (out_dev == paNoDevice) {
         fprintf(stderr, "audio: No default output device found.\n");
         return -1;
     }
-    const PaDeviceInfo *out_info = Pa_GetDeviceInfo(out_dev);
-    if (out_info == NULL) {
-        fprintf(stderr, "audio: Failed to get output device info.\n");
-        return -1;
+
+    /* Determine safe channel count (device may not support full stereo) */
+    int safe_channels = NUM_CHANNELS;
+    if (in_info->maxInputChannels < safe_channels) {
+        printf("audio: Device '%s' supports only %d input channel(s).\n",
+               in_info->name, in_info->maxInputChannels);
+        safe_channels = in_info->maxInputChannels;
     }
 
-    outputParams.device = out_dev;
-    outputParams.channelCount = 1; //mono output
-    outputParams.sampleFormat = paFloat32;
-    outputParams.suggestedLatency = out_info->defaultLowOutputLatency;
-    outputParams.hostApiSpecificStreamInfo = NULL;
+    /* Attempt 1: open with safe channel count */
+    if (try_open_stream(in_dev, out_dev, safe_channels) == 0) {
+        printf("audio: Full-duplex stream opened: input=%s (%d ch), output=default (1 ch)\n",
+               in_info->name, current_input_channels);
+        return 0;
+    }
 
-    //open full-duplex stream
-    err = Pa_OpenStream(
-        &stream,
-        &inputParams,
-        &outputParams,
-        SAMPLE_RATE,
-        FRAMES_PER_BUFFER,
-        paClipOff,
-        audio_callback,
-        global_rb);
-
-    //if opening fails and it's a hardware device, fall back to default
-    if (err != paNoError) {
-        fprintf(stderr, "audio: Pa_OpenStream error: %s\n", Pa_GetErrorText(err));
-
-        //check if we're using a hw:* device
-        if (strstr(in_info->name, "hw:") != NULL) {
-            fprintf(stderr, "audio: Hardware device failed. Falling back to 'default'.\n");
-
-            //find 'default' device in the list
-            int default_idx = -1;
-            for (int i = 0; i < device_count; i++) {
-                if (strstr(device_list[i].name, "default") != NULL) {
-                    default_idx = i;
-                    break;
-                }
-            }
-
-            if (default_idx >= 0) {
-                current_device_index = default_idx;
-                in_dev = device_list[default_idx].index;
-                inputParams.device = in_dev;
-
-                const PaDeviceInfo *def_info = Pa_GetDeviceInfo(in_dev);
-                if (def_info) {
-                    inputParams.suggestedLatency = def_info->defaultLowInputLatency;
-                }
-
-                err = Pa_OpenStream(&stream,
-                                    &inputParams,
-                                    &outputParams,
-                                    SAMPLE_RATE,
-                                    FRAMES_PER_BUFFER,
-                                    paClipOff,
-                                    audio_callback,
-                                    global_rb
-                );
-            }
-        }
-
-        if (err != paNoError) {
-            fprintf(stderr, "audio: Pa_Openstream fallback also failed: %s\n", Pa_GetErrorText(err));
-            stream = NULL;
-            return -1;
+    /* Attempt 2: if stereo failed, retry with mono */
+    if (safe_channels > 1) {
+        printf("audio: Multi-channel open failed. Retrying with mono...\n");
+        if (try_open_stream(in_dev, out_dev, 1) == 0) {
+            printf("audio: Full-duplex stream opened: input=%s (1 ch), output=default (1 ch)\n",
+                   in_info->name);
+            return 0;
         }
     }
 
-    printf("audio: Full-duplex stream opened: input=%s, output=%s\n", in_info->name, out_info->name);
-    return 0;
+    fprintf(stderr, "audio: Failed to open stream with device '%s'.\n", in_info->name);
+    return -1;
 }
-
 
 int audio_init(RingBuffer *rb) {
     PaError err;
-    //PaDeviceIndex device_index;
-    //const PaDeviceInfo *device_info;
 
     //validate input
     if (rb == NULL) {
@@ -352,6 +341,12 @@ int audio_update_signal_params(const SignalParams *params) {
     current_params = *params;
     current_params.sample_rate = SAMPLE_RATE;
 
+    //DEBUG PRINT 6, confirm type reaching audio layer
+    fprintf(stderr, "[AUDIO_UPDATE] type=%d active=%d f1=%.2f f2=%.2f fs=%u\n",
+            current_params.type, current_params.is_active,
+            current_params.frequency, current_params.frequency_end,
+            current_params.sample_rate);
+
     //init the selected signal generator
     if (current_params.is_active) {
         switch (current_params.type) {
@@ -360,6 +355,15 @@ int audio_update_signal_params(const SignalParams *params) {
                 break;
             case SIGNAL_LINEAR_SWEEP:
                 linear_sweep_init(&current_params);
+                break;
+            case SIGNAL_LOG_SWEEP:
+                logsweep_init(&current_params);
+                break;
+            case SIGNAL_WHITE_NOISE:
+                white_noise_init(&current_params);
+                break;
+            case SIGNAL_PINK_NOISE:
+                pink_noise_init(&current_params);
                 break;
             default:
                 //other types: do nothing yet
@@ -383,6 +387,10 @@ int audio_get_signal_params(SignalParams *params) {
 
 int audio_get_device_count(void) {
     return device_count;
+}
+
+int audio_get_input_channels(void) {
+    return current_input_channels;
 }
 
 const AudioDeviceInfo* audio_get_device_info(int index) {
@@ -414,18 +422,12 @@ int audio_select_device(int device_index) {
         audio_stop();
     }
 
-    /*stop stream if running
-    int was_running = is_running;
-    if (was_running) {
-        audio_stop();
-    }*/
-
     //close old stream
     if (stream) {
         Pa_CloseStream(stream);
         stream = NULL;
 
-        usleep(100000); //100ms delay to let ALSA or ASIO release the device
+        usleep(100000); //100ms delay to let ALSA (linux) or ASIO (windows) release the device
     }
 
     //update current device

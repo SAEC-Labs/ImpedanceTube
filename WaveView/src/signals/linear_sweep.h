@@ -6,7 +6,6 @@
 #define WAVEVIEW_LINEAR_SWEEP_H
 
 #include "signals.h"
-#include "signals/signals.h"
 
 void linear_sweep_init(const SignalParams *params);
 float linear_sweep_generate_sample(uint64_t sample_index);

@@ -26,6 +26,7 @@ static struct {
     uint32_t sample_rate;     //Sample rate (Hz)
     uint64_t start_sample;    //Sample index when sweep started
     int initialized;          //1 if ready to generate
+    int started;
     int sweep_active;         //1 if sweep is still running
 } sweep_state = {0};
 
@@ -67,6 +68,7 @@ void linear_sweep_init(const SignalParams *params)
 
     //Reset start sample
     sweep_state.start_sample = 0;
+    sweep_state.started = 0;
 
     //Sweep is active initially
     sweep_state.sweep_active = 1;
@@ -80,8 +82,9 @@ float linear_sweep_generate_sample(uint64_t sample_index)
     }
 
     //Store start sample on first call
-    if (sweep_state.start_sample == 0) {
+    if (!sweep_state.started) {
         sweep_state.start_sample = sample_index;
+        sweep_state.started = 1;
     }
 
     //Calculate elapsed samples
@@ -126,6 +129,7 @@ void linear_sweep_reset(void)
     sweep_state.phase_step = 0.0f;
     sweep_state.phase_step_increment = 0.0f;
     sweep_state.start_sample = 0;
+    sweep_state.started = 0;
     sweep_state.sweep_active = 0;
     sweep_state.initialized = 0;
 }

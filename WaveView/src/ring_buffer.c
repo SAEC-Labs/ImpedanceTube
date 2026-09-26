@@ -16,14 +16,20 @@
 
 #include "ring_buffer.h"
 #include <stdlib.h>
-//#include <string.h>
-//#include <stdatomic.h>
 
-RingBuffer* ring_buffer_create(const int size) {
-    RingBuffer *rb = (RingBuffer*) calloc(1, sizeof(RingBuffer));
+RingBuffer* ring_buffer_create(const int size, int channels) {
+    RingBuffer *rb = calloc(1, sizeof(RingBuffer));
+    if (rb == NULL) return NULL;
+
     rb->buffer = (float*) calloc(size, sizeof(float));
+    if (rb->buffer == NULL) {
+        free(rb);
+        return NULL;
+    }
     rb->size = size;
+    rb->channels = channels;
 
+    //direct assignment. atomic_int supports implicit atomic store
     rb->write_idx = 0;
     rb->read_idx = 0;
 
@@ -36,13 +42,15 @@ void ring_buffer_destroy(RingBuffer *rb) {
     free(rb);
 }
 
-int ring_buffer_write(RingBuffer *rb, const float *data, int frames) {
-    //int write_idx = atomic_load(&rb->write_idx);
+int ring_buffer_write(RingBuffer *rb, const float *data, int samples) {
+    if (rb == NULL || data == NULL || samples <= 0) return 0;
+
     int write_idx = rb->write_idx;
     int read_idx = rb->read_idx;
 
+    //one empty slot reserved to distinguish full and empty
     int available = rb->size - 1 - (write_idx - read_idx + rb->size) % rb->size;
-    int to_write = (frames < available) ? frames : available;
+    int to_write = (samples < available) ? samples : available;
 
     for (int i = 0; i < to_write; i++) {
         int idx = (write_idx + i) % rb->size;
@@ -53,12 +61,14 @@ int ring_buffer_write(RingBuffer *rb, const float *data, int frames) {
     return to_write;
 }
 
-int ring_buffer_read(RingBuffer *rb, float *out, int max_frames) {
+int ring_buffer_read(RingBuffer *rb, float *out, int samples) {
+    if (rb == NULL || out == NULL || samples <= 0) return 0;
+
     int read_idx = rb->read_idx;
     int write_idx = rb->write_idx;
 
     int available = (write_idx - read_idx + rb->size) % rb->size;
-    int to_read = (available < max_frames) ? available : max_frames;
+    int to_read = (available < samples) ? available : samples;
 
     for (int i = 0; i < to_read; i++) {
         int idx = (read_idx + i) % rb->size;

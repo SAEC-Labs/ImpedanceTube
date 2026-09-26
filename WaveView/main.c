@@ -21,6 +21,8 @@ static void signal_handler(int sig) {
     keep_running = 0;
     fprintf(stderr, "\nReceived interrupt signal. Shutting down...\n");
 
+    //TODO: more robust shutdown signal
+
 }
 
 int main(int argc, char **argv) {
@@ -45,7 +47,7 @@ int main(int argc, char **argv) {
 
     //Create ring buffer
     printf("Initializing ring buffer... ");
-    RingBuffer *rb = ring_buffer_create(RING_BUFFER_SIZE);
+    RingBuffer *rb = ring_buffer_create(RING_BUFFER_SIZE, NUM_CHANNELS);
 
     if (rb == NULL) {
         fprintf(stderr, "ring_buffer_create failed\n");
