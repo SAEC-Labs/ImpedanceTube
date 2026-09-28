@@ -599,7 +599,8 @@ static void app_activate(GtkApplication *app, const gpointer user_data)
 
     g_application_hold(G_APPLICATION(app));
 
-    GtkBuilder *builder = gtk_builder_new_from_file("main_window.ui");
+    //GtkBuilder *builder = gtk_builder_new_from_file("main_window.ui");
+    GtkBuilder *builder = gtk_builder_new_from_resource("/com/waveview/ui/main_window.ui");
 
     if (builder == NULL) {
         g_printerr("ERROR: Failed to load UI file.\n");

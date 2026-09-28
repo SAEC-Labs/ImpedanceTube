@@ -92,7 +92,7 @@ This method builds a native Windows executable inside the MSYS2 UCRT64 environme
    ```bash
    pacman -S git
    pacman -Syy
-   pacman -S mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-portaudio mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-make git
+   pacman -S mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-portaudio mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-make mingw-w64-ucrt-x86_64-glib2 mingw-w64-ucrt-x86_64-pkg-config git
 3. **clone and build**
    ```bash
    git clone https://github.com/SAEC-Labs/ImpedanceTube.git

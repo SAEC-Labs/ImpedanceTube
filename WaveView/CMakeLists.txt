@@ -13,6 +13,24 @@ pkg_check_modules(GTK4 REQUIRED gtk4)
 pkg_check_modules(CAIRO REQUIRED cairo)
 pkg_check_modules(PORTAUDIO REQUIRED portaudio-2.0)
 
+# GResource compilation to embed .ui file into the executable
+find_program(GLIB_COMPILE_RESOURCES NAMES glib-compile-resources REQUIRED)
+
+set(GRESOURCE_XML ${CMAKE_CURRENT_SOURCE_DIR}/ui/resources.gresource.xml)
+set(GRESOURCE_C   ${CMAKE_CURRENT_BINARY_DIR}/resources.c)
+
+add_custom_command(
+        OUTPUT  ${GRESOURCE_C}
+        COMMAND ${GLIB_COMPILE_RESOURCES}
+        --target=${GRESOURCE_C}
+        --sourcedir=${CMAKE_CURRENT_SOURCE_DIR}/ui
+        --generate-source
+        ${GRESOURCE_XML}
+        DEPENDS ${GRESOURCE_XML}
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/main_window.ui
+        VERBATIM
+)
+
 add_executable(WaveView main.c
         src/config.h
         src/ring_buffer.h
@@ -38,6 +56,7 @@ add_executable(WaveView main.c
         src/signals/white_noise.h
         src/signals/pink_noise.c
         src/signals/pink_noise.h
+        ${GRESOURCE_C} # generated C fle
 )
 
 # Link the libs
@@ -55,8 +74,7 @@ target_include_directories(WaveView PRIVATE
         ${PORTAUDIO_INCLUDE_DIRS}
         src
         src/external/kissfft
-        #${CMAKE_CURRENT_SOURCE_DIR}
-        #${CMAKE_CURRENT_BINARY_DIR}   # so the UI file is found
+
 )
 
 # Apply compiler flags
@@ -66,6 +84,4 @@ target_compile_options(WaveView PRIVATE
         ${PORTAUDIO_CFLAGS_OTHER}
 )
 
-# Copy UI file to build directory (so executable can find it)
-#file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/src/ui DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
