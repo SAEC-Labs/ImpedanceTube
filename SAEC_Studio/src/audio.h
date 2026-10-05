@@ -6,8 +6,8 @@
  * Audio capture interface, using STM32 DAQ (stereo mode), using PortAudio. samples are delivered via a callback and
  * written to the thread safe ring buffer
  */
-#ifndef WAVEVIEW_AUDIO_H
-#define WAVEVIEW_AUDIO_H
+#ifndef SAEC_STUDIO_AUDIO_H
+#define SAEC_STUDIO_AUDIO_H
 
 #include "ring_buffer.h"
 #include "signals/signals.h"
@@ -116,4 +116,4 @@ void audio_terminate(void);
  */
 int audio_get_input_channels(void);
 
-#endif //WAVEVIEW_AUDIO_H
+#endif //SAEC_STUDIO_AUDIO_H

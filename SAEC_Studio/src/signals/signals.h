@@ -2,8 +2,8 @@
 // Created by torq on 7/11/26.
 //
 
-#ifndef WAVEVIEW_SIGNALS_H
-#define WAVEVIEW_SIGNALS_H
+#ifndef SAEC_STUDIO_SIGNALS_H
+#define SAEC_STUDIO_SIGNALS_H
 
 #include <stdint.h>
 
@@ -80,4 +80,4 @@ static inline float uniform_signed(uint64_t *state) {
     return  (float)u * (2.0f / 16777216.0f) - 1.0f;
 }
 
-#endif //WAVEVIEW_SIGNALS_H
+#endif //SAEC_STUDIO_SIGNALS_H

@@ -2,8 +2,8 @@
 // Created by torq on 6/20/26.
 //
 
-#ifndef WAVEVIEW_RING_BUFFER_H
-#define WAVEVIEW_RING_BUFFER_H
+#ifndef SAEC_STUDIO_RING_BUFFER_H
+#define SAEC_STUDIO_RING_BUFFER_H
 
 #include <stdatomic.h>
 
@@ -54,4 +54,4 @@ int ring_buffer_write(RingBuffer *rb, const float *data, int samples);
  */
 int ring_buffer_read(RingBuffer *rb, float *out, int samples);
 
-#endif //WAVEVIEW_RING_BUFFER_H
+#endif //SAEC_STUDIO_RING_BUFFER_H

@@ -1,5 +1,5 @@
-# WaveView - GUI software for the Acoustic Impedance Test Tube
-WaveView is a pure‑C, cross‑platform application for real‑time audio capture, waveform visualization, and FFT‑based spectrum analysis. It uses:
+# Saec_Studio - GUI software for the Acoustic Impedance Test Tube
+Saec_Studio is a pure‑C, cross‑platform application for real‑time audio capture, waveform visualization, and FFT‑based spectrum analysis. It uses:
 - **PortAudio** for low‑latency audio I/O (ALSA on Linux, ASIO/WASAPI on Windows)
 - **KissFFT** for fast real‑time FFT
 - **GTK4 + Cairo** for a clean, responsive graphical interface.
@@ -74,7 +74,7 @@ It is designed as the software frontend for the acoustic impedance tube project,
 2. **clone the repo**
    ```bash
    git clone https://github.com/SAEC-Labs/ImpedanceTube.git
-   cd WaveView
+   cd Saec_Studio
 3. **buid with Cmake**
    ```bash
    mkdir build && cd build
@@ -96,7 +96,7 @@ This method builds a native Windows executable inside the MSYS2 UCRT64 environme
 3. **clone and build**
    ```bash
    git clone https://github.com/SAEC-Labs/ImpedanceTube.git
-   chdir ImopedanceTube/WaveView/
+   chdir ImopedanceTube/Saec_Studio/
    mkdir build && chdir build
    cmake .. -G "MinGW Makefiles"
    make -j$(nproc)

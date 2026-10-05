@@ -9,8 +9,8 @@
  * using the KissFFT library. Designed for real-time audio analysis.
  */
 
-#ifndef WAVEVIEW_DSP_H
-#define WAVEVIEW_DSP_H
+#ifndef SAEC_STUDIO_DSP_H
+#define SAEC_STUDIO_DSP_H
 
 /**
  * Compute the magnitude spectrum of a time-domain signal.
@@ -32,4 +32,4 @@ void compute_spectrum(const float *time_data, float *magnitude, int fft_size);
  */
 void apply_hann_window(float *data, int n);
 
-#endif //WAVEVIEW_DSP_H
+#endif //SAEC_STUDIO_DSP_H
