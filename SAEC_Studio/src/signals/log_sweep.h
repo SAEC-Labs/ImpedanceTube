@@ -2,8 +2,8 @@
 // Created by torq on 9/23/26.
 //
 
-#ifndef WAVEVIEW_LOG_SWEEP_H
-#define WAVEVIEW_LOG_SWEEP_H
+#ifndef SAEC_STUDIO_LOG_SWEEP_H
+#define SAEC_STUDIO_LOG_SWEEP_H
 
 #include "signals.h"
 
@@ -30,4 +30,4 @@ int logsweep_is_active(void);
  */
 void logsweep_reset(void);
 
-#endif //WAVEVIEW_LOG_SWEEP_H
+#endif //SAEC_STUDIO_LOG_SWEEP_H

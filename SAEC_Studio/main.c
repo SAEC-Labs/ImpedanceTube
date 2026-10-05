@@ -33,7 +33,7 @@ int main(int argc, char **argv) {
 
     printf("\n");
     printf("╔═══════════════════════════════════════════╗\n");
-    printf("║     WaveView – Live Microphone Monitor    ║\n");
+    printf("║     SAEC_Studio – Impedance Tube Analyzer ║\n");
     printf("║          (C) 2026 SAEC Team               ║\n");
     printf("╚═══════════════════════════════════════════╝\n");
     printf("\n");
@@ -74,7 +74,7 @@ int main(int argc, char **argv) {
     ring_buffer_destroy(rb);
     printf("Ok\n");
 
-    printf("\nWaveView exited.\n");
+    printf("\nSaec_Studio exited.\n");
 
     return ret;
 }

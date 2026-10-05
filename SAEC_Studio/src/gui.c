@@ -600,7 +600,7 @@ static void app_activate(GtkApplication *app, const gpointer user_data)
     g_application_hold(G_APPLICATION(app));
 
     //GtkBuilder *builder = gtk_builder_new_from_file("main_window.ui");
-    GtkBuilder *builder = gtk_builder_new_from_resource("/com/waveview/ui/main_window.ui");
+    GtkBuilder *builder = gtk_builder_new_from_resource("/com/saecstudio/ui/main_window.ui");
 
     if (builder == NULL) {
         g_printerr("ERROR: Failed to load UI file.\n");
@@ -731,7 +731,7 @@ int gui_run(const int argc, char **argv, RingBuffer *rb)
     memset(state->spectrum_buffer_ch2, 0, (FFT_SIZE / 2) * sizeof(float));
     state->waveform_frames = 0;
 
-    GtkApplication *app = gtk_application_new("com.waveview.app", G_APPLICATION_DEFAULT_FLAGS);
+    GtkApplication *app = gtk_application_new("com.saecstudio.app", G_APPLICATION_DEFAULT_FLAGS);
     state->app = app;
     g_signal_connect(app, "activate", G_CALLBACK(app_activate), state);
 

@@ -2,8 +2,8 @@
 // Created by torq on 6/20/26.
 //
 
-#ifndef WAVEVIEW_GUI_H
-#define WAVEVIEW_GUI_H
+#ifndef SAEC_STUDIO_GUI_H
+#define SAEC_STUDIO_GUI_H
 
 #include "ring_buffer.h"
 
@@ -19,4 +19,4 @@
  */
 int gui_run(int argc, char **argv, RingBuffer *rb);
 
-#endif //WAVEVIEW_GUI_H
+#endif //SAEC_STUDIO_GUI_H

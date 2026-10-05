@@ -2,8 +2,8 @@
 // Created by torq on 6/20/26.
 //configuration file
 
-#ifndef WAVEVIEW_CONFIG_H
-#define WAVEVIEW_CONFIG_H
+#ifndef SAEC_STUDIO_CONFIG_H
+#define SAEC_STUDIO_CONFIG_H
 
 #define SAMPLE_RATE 44100
 #define FRAMES_PER_BUFFER 256
@@ -20,4 +20,4 @@
 #define FFT_SIZE 1024
 #define PLOT_POINTS 512
 
-#endif //WAVEVIEW_CONFIG_H
+#endif //SAEC_STUDIO_CONFIG_H

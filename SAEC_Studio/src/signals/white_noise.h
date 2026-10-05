@@ -2,8 +2,8 @@
 // Created by torq on 9/26/26.
 //
 
-#ifndef WAVEVIEW_WHITE_NOISE_H_H
-#define WAVEVIEW_WHITE_NOISE_H_H
+#ifndef SAEC_STUDIO_WHITE_NOISE_H_H
+#define SAEC_STUDIO_WHITE_NOISE_H_H
 
 #include "signals.h"
 
@@ -26,4 +26,4 @@ float white_noise_generate_sample(uint64_t sample_index);
 void white_noise_reset(void);
 
 
-#endif //WAVEVIEW_WHITE_NOISE_H_H
+#endif //SAEC_STUDIO_WHITE_NOISE_H_H

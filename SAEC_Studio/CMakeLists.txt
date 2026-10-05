@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 4.2)
-project(WaveView C)
+project(SAEC_Studio C)
 
 set(CMAKE_C_STANDARD 11)
 
@@ -31,7 +31,7 @@ add_custom_command(
         VERBATIM
 )
 
-add_executable(WaveView main.c
+add_executable(SAEC_Studio main.c
         src/config.h
         src/ring_buffer.h
         src/ring_buffer.c
@@ -60,7 +60,7 @@ add_executable(WaveView main.c
 )
 
 # Link the libs
-target_link_libraries(WaveView
+target_link_libraries(SAEC_Studio
         ${GTK4_LIBRARIES}
         ${CAIRO_LIBRARIES}
         ${PORTAUDIO_LIBRARIES}
@@ -68,7 +68,7 @@ target_link_libraries(WaveView
 )
 
 # Include the header directories
-target_include_directories(WaveView PRIVATE
+target_include_directories(SAEC_Studio PRIVATE
         ${GTK4_INCLUDE_DIRS}
         ${CAIRO_INCLUDE_DIRS}
         ${PORTAUDIO_INCLUDE_DIRS}
@@ -78,7 +78,7 @@ target_include_directories(WaveView PRIVATE
 )
 
 # Apply compiler flags
-target_compile_options(WaveView PRIVATE
+target_compile_options(SAEC_Studio PRIVATE
         ${GTK4_CFLAGS_OTHER}
         ${CAIRO_CFLAGS_OTHER}
         ${PORTAUDIO_CFLAGS_OTHER}
