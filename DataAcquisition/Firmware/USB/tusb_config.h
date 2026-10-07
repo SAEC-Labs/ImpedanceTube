@@ -104,7 +104,7 @@ extern "C"
 
 #define CFG_TUD_AUDIO_FUNC_1_N_BITS_PER_SAMPLE_TX 16
 
-#define CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX 1
+#define CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX 2
 
     /*
      * STM32F401 USB is Full Speed only.
