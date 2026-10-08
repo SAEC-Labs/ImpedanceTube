@@ -7,7 +7,7 @@
 
 #include "gui.h"
 #include "config.h"
-#include "dsp.h"
+#include "dsp/dsp.h"
 #include "audio.h"
 #include <gtk/gtk.h>
 #include <cairo.h>
