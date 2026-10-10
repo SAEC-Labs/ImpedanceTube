@@ -56,7 +56,9 @@ add_executable(SAEC_Studio main.c
         src/signals/white_noise.h
         src/signals/pink_noise.c
         src/signals/pink_noise.h
-        ${GRESOURCE_C} # generated C fle
+        ${GRESOURCE_C}
+        src/dsp/welch.c
+        src/dsp/welch.h # generated C fle
 )
 
 # Link the libs
