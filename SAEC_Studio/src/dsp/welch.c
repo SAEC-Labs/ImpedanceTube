@@ -294,7 +294,85 @@ float measure_bin_to_hz(int bin, float sample_rate) {
 /* -------------------------------------------------------------------
  * Self Test
  * ------------------------------------------------------------------*/
+void measure_selftest(void) {
+    printf("\n====== measure_selftest ======\n");
 
+    if (measure_init() != 0) {
+        printf("[selftest] FAILED: init\n");
+        return;
+    }
+
+    const int fs = 44100;
+    const float freq = 440.0f;
+    const int total_n = MEASURE_FFT_SIZE + (MEASURE_NUM_SEGMENTS - 1) * MEASURE_SHIFT;
+
+    float *ch1 = malloc(total_n * sizeof(float));
+    float *ch2 = malloc(total_n * sizeof(float));
+
+    if (!ch1 || !ch2) {
+        printf("[selftest] FAILED: malloc\n");
+        free(ch1);
+        free(ch2);
+        measure_free();
+        return;
+    }
+
+    //two identical 440Hz sine waves
+     for (int i = 0; i < total_n; i++) {
+         const float s = sinf(2.0f * (float)M_PI2 * freq * i / fs);
+         ch1[i] = s;
+         ch2[i] = s;
+     }
+
+    //feed in 512 sample blocks
+    int pos = 0;
+    while (pos < total_n) {
+        int block = 512;
+        if (pos + block > total_n) {
+            block = total_n - pos;
+        }
+        if (measure_feed_block(ch1 + pos, ch2 + pos, block) == 1) {
+            break;
+        }
+        pos += block;
+    }
+
+    if (measure_get_status() != MEASURE_STATUS_COMPLETE) {
+        printf("[selftest] FAILED: not complete\n");
+        free(ch1);
+        free(ch2);
+        measure_free();
+        return;
+    }
+
+    //Check the 440 Hz bin
+    const int bin = (int)roundf(freq * MEASURE_FFT_SIZE / fs);
+
+    const float *G11   = measure_get_G11();
+    const float *G22   = measure_get_G22();
+    const float *G12r  = measure_get_G12_real();
+    const float *G12i  = measure_get_G12_imag();
+
+    const double g11 = G11[bin];
+    const double g22 = G22[bin];
+    const double g12r = G12r[bin];
+    const double g12i = G12i[bin];
+    const double coh = (g12r*g12r + g12i*g12i) / (g11 * g22 + 1e-20);
+
+    const double phase_deg = atan2(g12i, g12r) * 180.0 / M_PI;
+
+    printf("[selftest] bin %d (%.1f Hz)\n", bin, measure_bin_to_hz(bin, fs));
+    printf("  G11 = %.6e\n", g11);
+    printf("  G22 = %.6e\n", g22);
+    printf("  G12 = %.6e + j·%.6e\n", g12r, g12i);
+    printf("  Coherence = %.6f   (expect ~1.000)\n", coh);
+    printf("  Phase     = %.4f°  (expect ~0.0)\n", phase_deg);
+    printf("[selftest] %s\n", (coh > 0.99) ? "PASSED" : "FAILED");
+
+    free(ch1);
+    free(ch2);
+    measure_free();
+}
 
 
 

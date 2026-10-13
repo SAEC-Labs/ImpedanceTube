@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
+
+#include "dsp/welch.h"
 #include "src/config.h"
 #include "src/ring_buffer.h"
 #include "src/audio.h"
@@ -33,7 +35,7 @@ int main(int argc, char **argv) {
 
     printf("\n");
     printf("╔═══════════════════════════════════════════╗\n");
-    printf("║     SAEC_Studio – Impedance Tube Analyzer ║\n");
+    printf("║     SAEC Studio – Impedance Tube Analyzer ║\n");
     printf("║          (C) 2026 SAEC Team               ║\n");
     printf("╚═══════════════════════════════════════════╝\n");
     printf("\n");
@@ -63,6 +65,10 @@ int main(int argc, char **argv) {
         return 1;
     }
     printf("Ok (device: %s)\n", audio_get_device_name());
+
+    //measure selftest
+    measure_selftest();
+    return 0; //exite after self test
 
     //Launch GUI: blocks until window is closed
     printf("Launching GUI...\n\n");
