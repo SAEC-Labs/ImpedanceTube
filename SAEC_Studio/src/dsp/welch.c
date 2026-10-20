@@ -125,7 +125,7 @@ int measure_init(void) {
 
     m_ctx.window_power = 0.0;
     for (int i = 0; i < MEASURE_FFT_SIZE; i++) {
-        float w = 0.5f * (1.0f - cosf(2.0f * (float)M_PI2 * i / (MEASURE_FFT_SIZE - 1)));
+        const float w = 0.5f * (1.0f - cosf(2.0f * (float)M_PI2 * i / (MEASURE_FFT_SIZE - 1)));
         m_ctx.window[i] = w;
         m_ctx.window_power += (double)w * (double)w;
     }
