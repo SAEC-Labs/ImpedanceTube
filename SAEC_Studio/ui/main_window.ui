@@ -4,8 +4,8 @@
 
     <object class="GtkApplicationWindow" id="main_window">
         <property name="title">SAEC Studio – ImpedanceTube Signal Viewer &amp; Analyzer</property>
-        <property name="default-width">1200</property>
-        <property name="default-height">850</property>
+        <property name="default-width">1150</property>
+        <property name="default-height">750</property>
         <property name="resizable">True</property>
         <child>
             <object class="GtkBox" id="main_vbox">
@@ -115,7 +115,7 @@
                                                     <object class="GtkDrawingArea" id="waveform_area_ch1">
                                                         <property name="hexpand">True</property>
                                                         <property name="vexpand">True</property>
-                                                        <property name="height-request">200</property>
+                                                        <property name="height-request">120</property>
                                                     </object>
                                                 </child>
                                             </object>
@@ -134,7 +134,7 @@
                                                     <object class="GtkDrawingArea" id="waveform_area_ch2">
                                                         <property name="hexpand">True</property>
                                                         <property name="vexpand">True</property>
-                                                        <property name="height-request">200</property>
+                                                        <property name="height-request">120</property>
                                                     </object>
                                                 </child>
                                             </object>
@@ -163,7 +163,7 @@
                                                     <object class="GtkDrawingArea" id="spectrum_area_ch1">
                                                         <property name="hexpand">True</property>
                                                         <property name="vexpand">True</property>
-                                                        <property name="height-request">200</property>
+                                                        <property name="height-request">120</property>
                                                     </object>
                                                 </child>
                                             </object>
@@ -182,7 +182,7 @@
                                                     <object class="GtkDrawingArea" id="spectrum_area_ch2">
                                                         <property name="hexpand">True</property>
                                                         <property name="vexpand">True</property>
-                                                        <property name="height-request">200</property>
+                                                        <property name="height-request">120</property>
                                                     </object>
                                                 </child>
                                             </object>
@@ -219,7 +219,7 @@
                                     <object class="GtkDrawingArea" id="h12_area">
                                         <property name="hexpand">True</property>
                                         <property name="vexpand">True</property>
-                                        <property name="height-request">280</property>
+                                        <property name="height-request">180</property>
                                     </object>
                                 </child>
 
@@ -233,7 +233,7 @@
                                     <object class="GtkDrawingArea" id="coherence_area">
                                         <property name="hexpand">True</property>
                                         <property name="vexpand">True</property>
-                                        <property name="height-request">280</property>
+                                        <property name="height-request">180</property>
                                     </object>
                                 </child>
                             </object>

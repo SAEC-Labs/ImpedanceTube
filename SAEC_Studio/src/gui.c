@@ -879,6 +879,11 @@ static void app_activate(GtkApplication *app, const gpointer user_data)
 
     refresh_status(state);
 
+    /* Explicitly ensure the window is resizable from all edges.
+     * Some window managers ignore the XML property if other hints are set.
+     */
+    gtk_window_set_resizable(GTK_WINDOW(state->window), TRUE);
+
     gtk_window_present(GTK_WINDOW(state->window));
 
     //Auto-start stream
