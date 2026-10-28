@@ -33,8 +33,7 @@ typedef struct {
 
 static AnalysisContext a_ctx = {0};
 
-
-static int analysis_int(const int num_bins) {
+int analysis_init(const int num_bins) {
     if (a_ctx.initialized) return 0;
     if (num_bins <= 0) return -1;
 
