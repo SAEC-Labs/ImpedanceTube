@@ -3,9 +3,9 @@
     <requires lib="gtk" version="4.0"/>
 
     <object class="GtkApplicationWindow" id="main_window">
-        <property name="title">SAEC_Studio – Impedance Tube Signal Viewer &amp; Analyzer</property>
+        <property name="title">SAEC Studio – ImpedanceTube Signal Viewer &amp; Analyzer</property>
         <property name="default-width">1200</property>
-        <property name="default-height">800</property>
+        <property name="default-height">850</property>
         <property name="resizable">True</property>
         <child>
             <object class="GtkBox" id="main_vbox">
@@ -51,117 +51,194 @@
                                 <property name="hexpand">False</property>
                             </object>
                         </child>
+
+                        <child>
+                            <object class="GtkButton" id="measure_button">
+                                <property name="label">Measure</property>
+                                <property name="hexpand">False</property>
+                            </object>
+                        </child>
                     </object>
                 </child>
 
-                <!-- Waveform Row: Two side-by-side plots -->
+                <!-- ============ Notebook (Tabs) ============ -->
                 <child>
-                    <object class="GtkBox" id="waveform_row">
-                        <property name="orientation">horizontal</property>
-                        <property name="spacing">5</property>
-                        <property name="homogeneous">True</property>
+                    <object class="GtkNotebook" id="main_notebook">
+                        <property name="hexpand">True</property>
                         <property name="vexpand">True</property>
 
+                        <!-- Tab 1: Live -->
+                        <!-- CONTENT CHILD -->
                         <child>
-                            <object class="GtkBox" id="waveform_col1">
+                            <object class="GtkBox" id="live_tab_vbox">
                                 <property name="orientation">vertical</property>
-                                <property name="spacing">2</property>
+                                <property name="spacing">5</property>
+                                <property name="margin-start">5</property>
+                                <property name="margin-end">5</property>
+                                <property name="margin-top">5</property>
+                                <property name="margin-bottom">5</property>
+
+                                <!-- Waveform row -->
                                 <child>
-                                    <object class="GtkLabel" id="waveform_label_ch1">
-                                        <property name="label">Mic 1 – Time Domain</property>
-                                        <property name="halign">center</property>
-                                    </object>
-                                </child>
-                                <child>
-                                    <object class="GtkDrawingArea" id="waveform_area_ch1">
-                                        <property name="hexpand">True</property>
+                                    <object class="GtkBox" id="waveform_row">
+                                        <property name="orientation">horizontal</property>
+                                        <property name="spacing">5</property>
+                                        <property name="homogeneous">True</property>
                                         <property name="vexpand">True</property>
-                                        <property name="height-request">220</property>
+                                        <child>
+                                            <object class="GtkBox" id="waveform_col1">
+                                                <property name="orientation">vertical</property>
+                                                <property name="spacing">2</property>
+                                                <child>
+                                                    <object class="GtkLabel" id="waveform_label_ch1">
+                                                        <property name="label">Mic 1 – Time Domain</property>
+                                                        <property name="halign">center</property>
+                                                    </object>
+                                                </child>
+                                                <child>
+                                                    <object class="GtkDrawingArea" id="waveform_area_ch1">
+                                                        <property name="hexpand">True</property>
+                                                        <property name="vexpand">True</property>
+                                                        <property name="height-request">200</property>
+                                                    </object>
+                                                </child>
+                                            </object>
+                                        </child>
+                                        <child>
+                                            <object class="GtkBox" id="waveform_col2">
+                                                <property name="orientation">vertical</property>
+                                                <property name="spacing">2</property>
+                                                <child>
+                                                    <object class="GtkLabel" id="waveform_label_ch2">
+                                                        <property name="label">Mic 2 – Time Domain</property>
+                                                        <property name="halign">center</property>
+                                                    </object>
+                                                </child>
+                                                <child>
+                                                    <object class="GtkDrawingArea" id="waveform_area_ch2">
+                                                        <property name="hexpand">True</property>
+                                                        <property name="vexpand">True</property>
+                                                        <property name="height-request">200</property>
+                                                    </object>
+                                                </child>
+                                            </object>
+                                        </child>
                                     </object>
                                 </child>
+
+                                <!-- Spectrum row -->
+                                <child>
+                                    <object class="GtkBox" id="spectrum_row">
+                                        <property name="orientation">horizontal</property>
+                                        <property name="spacing">5</property>
+                                        <property name="homogeneous">True</property>
+                                        <property name="vexpand">True</property>
+                                        <child>
+                                            <object class="GtkBox" id="spectrum_col1">
+                                                <property name="orientation">vertical</property>
+                                                <property name="spacing">2</property>
+                                                <child>
+                                                    <object class="GtkLabel" id="spectrum_label_ch1">
+                                                        <property name="label">Mic 1 – Spectrum (FFT)</property>
+                                                        <property name="halign">center</property>
+                                                    </object>
+                                                </child>
+                                                <child>
+                                                    <object class="GtkDrawingArea" id="spectrum_area_ch1">
+                                                        <property name="hexpand">True</property>
+                                                        <property name="vexpand">True</property>
+                                                        <property name="height-request">200</property>
+                                                    </object>
+                                                </child>
+                                            </object>
+                                        </child>
+                                        <child>
+                                            <object class="GtkBox" id="spectrum_col2">
+                                                <property name="orientation">vertical</property>
+                                                <property name="spacing">2</property>
+                                                <child>
+                                                    <object class="GtkLabel" id="spectrum_label_ch2">
+                                                        <property name="label">Mic 2 – Spectrum (FFT)</property>
+                                                        <property name="halign">center</property>
+                                                    </object>
+                                                </child>
+                                                <child>
+                                                    <object class="GtkDrawingArea" id="spectrum_area_ch2">
+                                                        <property name="hexpand">True</property>
+                                                        <property name="vexpand">True</property>
+                                                        <property name="height-request">200</property>
+                                                    </object>
+                                                </child>
+                                            </object>
+                                        </child>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+                        <!-- TAB LABEL SECOND -->
+                        <child type="tab">
+                            <object class="GtkLabel">
+                                <property name="label">Live</property>
                             </object>
                         </child>
 
+                        <!-- Tab 2: Transfer Function -->
+                        <!-- CONTENT CHILD -->
                         <child>
-                            <object class="GtkBox" id="waveform_col2">
+                            <object class="GtkBox" id="transfer_tab_vbox">
                                 <property name="orientation">vertical</property>
-                                <property name="spacing">2</property>
+                                <property name="spacing">5</property>
+                                <property name="margin-start">5</property>
+                                <property name="margin-end">5</property>
+                                <property name="margin-top">5</property>
+                                <property name="margin-bottom">5</property>
+
                                 <child>
-                                    <object class="GtkLabel" id="waveform_label_ch2">
-                                        <property name="label">Mic 2 – Time Domain</property>
+                                    <object class="GtkLabel" id="h12_label">
+                                        <property name="label">|H₁₂(f)| Transfer Function – Magnitude (dB)</property>
                                         <property name="halign">center</property>
                                     </object>
                                 </child>
                                 <child>
-                                    <object class="GtkDrawingArea" id="waveform_area_ch2">
+                                    <object class="GtkDrawingArea" id="h12_area">
                                         <property name="hexpand">True</property>
                                         <property name="vexpand">True</property>
-                                        <property name="height-request">220</property>
+                                        <property name="height-request">280</property>
+                                    </object>
+                                </child>
+
+                                <child>
+                                    <object class="GtkLabel" id="coherence_label">
+                                        <property name="label">Coherence γ²(f)</property>
+                                        <property name="halign">center</property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="GtkDrawingArea" id="coherence_area">
+                                        <property name="hexpand">True</property>
+                                        <property name="vexpand">True</property>
+                                        <property name="height-request">280</property>
                                     </object>
                                 </child>
                             </object>
                         </child>
+                        <!-- TAB LABEL SECOND -->
+                        <child type="tab">
+                            <object class="GtkLabel">
+                                <property name="label">Transfer Function</property>
+                            </object>
+                        </child>
+
                     </object>
                 </child>
 
-                <!-- Spectrum Row: Two side-by-side plots -->
-                <child>
-                    <object class="GtkBox" id="spectrum_row">
-                        <property name="orientation">horizontal</property>
-                        <property name="spacing">5</property>
-                        <property name="homogeneous">True</property>
-                        <property name="vexpand">True</property>
-
-                        <child>
-                            <object class="GtkBox" id="spectrum_col1">
-                                <property name="orientation">vertical</property>
-                                <property name="spacing">2</property>
-                                <child>
-                                    <object class="GtkLabel" id="spectrum_label_ch1">
-                                        <property name="label">Mic 1 – Spectrum (FFT)</property>
-                                        <property name="halign">center</property>
-                                    </object>
-                                </child>
-                                <child>
-                                    <object class="GtkDrawingArea" id="spectrum_area_ch1">
-                                        <property name="hexpand">True</property>
-                                        <property name="vexpand">True</property>
-                                        <property name="height-request">220</property>
-                                    </object>
-                                </child>
-                            </object>
-                        </child>
-
-                        <child>
-                            <object class="GtkBox" id="spectrum_col2">
-                                <property name="orientation">vertical</property>
-                                <property name="spacing">2</property>
-                                <child>
-                                    <object class="GtkLabel" id="spectrum_label_ch2">
-                                        <property name="label">Mic 2 – Spectrum (FFT)</property>
-                                        <property name="halign">center</property>
-                                    </object>
-                                </child>
-                                <child>
-                                    <object class="GtkDrawingArea" id="spectrum_area_ch2">
-                                        <property name="hexpand">True</property>
-                                        <property name="vexpand">True</property>
-                                        <property name="height-request">220</property>
-                                    </object>
-                                </child>
-                            </object>
-                        </child>
-                    </object>
-                </child>
-
-                <!-- Separator -->
+                <!-- ============ Status Bar ============-->
                 <child>
                     <object class="GtkSeparator" id="separator">
                         <property name="orientation">horizontal</property>
                     </object>
                 </child>
 
-                <!-- Status Label -->
                 <child>
                     <object class="GtkLabel" id="status_label">
                         <property name="label">Initializing...</property>
@@ -183,6 +260,7 @@
         <property name="default-width">450</property>
         <property name="default-height">400</property>
         <property name="resizable">False</property>
+        <property name="use-header-bar">0</property>
 
         <child>
             <object class="GtkBox" id="dialog_vbox">
@@ -212,7 +290,6 @@
                         <property name="orientation">vertical</property>
                         <property name="spacing">8</property>
                         <property name="visible">True</property>
-
                         <child>
                             <object class="GtkBox" id="sine_freq_box">
                                 <property name="orientation">horizontal</property>
@@ -240,7 +317,6 @@
                                 </child>
                             </object>
                         </child>
-
                         <child>
                             <object class="GtkBox" id="sine_amp_box">
                                 <property name="orientation">horizontal</property>
@@ -279,7 +355,6 @@
                         <property name="orientation">vertical</property>
                         <property name="spacing">8</property>
                         <property name="visible">False</property>
-
                         <child>
                             <object class="GtkBox" id="sweep_start_box">
                                 <property name="orientation">horizontal</property>
@@ -307,7 +382,6 @@
                                 </child>
                             </object>
                         </child>
-
                         <child>
                             <object class="GtkBox" id="sweep_end_box">
                                 <property name="orientation">horizontal</property>
@@ -335,7 +409,6 @@
                                 </child>
                             </object>
                         </child>
-
                         <child>
                             <object class="GtkBox" id="sweep_duration_box">
                                 <property name="orientation">horizontal</property>
@@ -363,7 +436,6 @@
                                 </child>
                             </object>
                         </child>
-
                         <child>
                             <object class="GtkBox" id="sweep_amp_box">
                                 <property name="orientation">horizontal</property>
@@ -396,13 +468,12 @@
                     </object>
                 </child>
 
-                <!-- Noise Parameters Box (Amplitude only) -->
+                <!-- Noise Parameters Box -->
                 <child>
                     <object class="GtkBox" id="noise_params_box">
                         <property name="orientation">vertical</property>
                         <property name="spacing">8</property>
                         <property name="visible">False</property>
-
                         <child>
                             <object class="GtkBox" id="noise_amp_box">
                                 <property name="orientation">horizontal</property>
@@ -435,7 +506,7 @@
                     </object>
                 </child>
 
-                <!-- Future Signals Placeholder -->
+                <!-- Future placeholder (for brownian noise only)-->
                 <child>
                     <object class="GtkBox" id="future_params_box">
                         <property name="orientation">vertical</property>
@@ -451,28 +522,25 @@
                     </object>
                 </child>
 
-                <!-- Separator above buttons -->
+                <!-- Separator + Button Box -->
                 <child>
                     <object class="GtkSeparator" id="dialog_button_separator">
                         <property name="orientation">horizontal</property>
                     </object>
                 </child>
 
-                <!-- Button Box -->
                 <child>
                     <object class="GtkBox" id="dialog_button_box">
                         <property name="orientation">horizontal</property>
                         <property name="spacing">10</property>
                         <property name="halign">end</property>
                         <property name="margin-top">10</property>
-
                         <child>
                             <object class="GtkButton" id="dialog_cancel_button">
                                 <property name="label">Cancel</property>
                                 <property name="visible">True</property>
                             </object>
                         </child>
-
                         <child>
                             <object class="GtkButton" id="dialog_generate_button">
                                 <property name="label">Generate</property>

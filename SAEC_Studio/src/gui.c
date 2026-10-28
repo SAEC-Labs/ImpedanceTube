@@ -16,6 +16,9 @@
 #include <string.h>
 #include <math.h>
 
+#include "analyzer.h"
+#include "dsp/welch.h"
+
 //channel detection modes
 #define CHANNEL_MODE_UNKNOWN 0
 #define CHANNEL_MODE_MONO 1
@@ -29,12 +32,15 @@ typedef struct {
     GtkWidget *waveform_area_ch2;
     GtkWidget *spectrum_area_ch1;
     GtkWidget *spectrum_area_ch2;
+    GtkWidget *h12_area;
+    GtkWidget *coherence_area;
     GtkWidget *waveform_col2; //for hide/show
     GtkWidget *spectrum_col2; //for hide/show
     GtkWidget *status_label;
     GtkWidget *device_combo;
     GtkWidget *signal_type_combo;
     GtkWidget *generate_button;
+    GtkWidget *measure_button;
     GtkWidget *cancel_button;
     GtkWidget *start_stop_button;
     GtkBuilder *builder;
@@ -50,6 +56,10 @@ typedef struct {
     int num_freq_bins;
     int waveform_frames;
 
+    //measurement state
+    int measurement_active;
+    int measurement_complete;
+
     //Stream state
     int is_streaming;
     int channel_mode; //detected input mode
@@ -57,6 +67,8 @@ typedef struct {
     //signal params
     SignalParams signal_params;
 } GUIState;
+
+
 
 /*-------------------------------------------------
  * channel mode heplers
@@ -116,7 +128,7 @@ static int is_pulse_device(const char *name)
 //update dialog labels and visibility based on signal type
 static void update_dialog_visibility(GUIState *state)
 {
-    guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(state->signal_type_combo));
+    const guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(state->signal_type_combo));
     const char *type_names[] = {
         "Sine Wave",
         "Linear Sweep",
@@ -357,8 +369,9 @@ static void populate_signal_type_combo(GUIState *state)
     gtk_drop_down_set_selected(GTK_DROP_DOWN(state->signal_type_combo), 0);
     g_object_unref(string_list);
 
-    //TODO: better coonect signal dialog when selection changes
+    //TODO: better connect signal dialog when selection changes
 }
+
 
 /*------------------------------------------------------------
  * Drawing Helpers to be used across channels
@@ -438,7 +451,7 @@ static void on_draw_waveform_ch1(GtkDrawingArea *area, cairo_t *cr, int width, i
 static void on_draw_waveform_ch2(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data)
 {
     (void) area;
-    GUIState *state = user_data;
+    const GUIState *state = user_data;
 
     //Amber
     draw_waveform_common(cr, width, height, state->waveform_buffer_ch2, state->waveform_frames, 1.0, 0.6, 0.1);
@@ -463,6 +476,117 @@ static void on_draw_spectrum_ch2(GtkDrawingArea *area, cairo_t *cr, int width, i
 }
 
 
+static void draw_h12_common(cairo_t *cr, int width, int height, const float *h12_mag_db, int num_bins, int complete) {
+    cairo_set_source_rgb(cr, 0.08, 0.08, 0.10);
+    cairo_paint(cr);
+
+    //reference line at 0 dB
+    cairo_set_source_rgba(cr, 0.4, 0.4, 0.4, 0.6);
+    cairo_set_line_width(cr, 1.0);
+
+    const double y_0db = height / 2.0;
+
+    cairo_move_to(cr, 0, y_0db);
+    cairo_line_to(cr, width, y_0db);
+    cairo_stroke(cr);
+
+    if (!complete || !h12_mag_db) {
+        cairo_set_source_rgb(cr, 0.6, 0.6, 0.6);
+        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(cr, 14);
+        cairo_show_text(cr, "Click 'Measure' to acquire H12");
+        return;
+    }
+
+    //y-axis range: -60dB bottom to +20dB top
+    const float db_top = 20.0f;
+    const float db_bottom = -60.0f;
+    const float db_range = db_top - db_bottom;
+
+    //plot bins now: 1..num_bins-1 skipping DC
+    cairo_set_source_rgb(cr, 0.2, 0.9, 0.7);
+    cairo_set_line_width(cr, 1.6);
+
+    int first = 1;
+    for (int i = 1; i < num_bins; i++) {
+        const double x = (double)i / (num_bins - 1) * width;
+        float v = h12_mag_db[i];
+
+        if (v < db_bottom) v = db_bottom;
+        if (v > db_top) v = db_top;
+
+        const double y = height - ( v - db_bottom) / db_range * height;
+
+        if (first) {
+            cairo_move_to(cr, x, y);
+            first = 0;
+        } else {
+            cairo_line_to(cr, x, y);
+        }
+    }
+    cairo_stroke(cr);
+}
+
+static void draw_coherence_common(cairo_t *cr, int width, int height, const float *coh, int num_bins, int complete) {
+    cairo_set_source_rgb(cr, 0.08, 0.08, 0.10);
+    cairo_paint(cr);
+
+    //threshold at 0.95
+    cairo_set_source_rgba(cr, 0.4, 0.6, 0.4, 0.6);
+    cairo_set_line_width(cr, 1.0);
+
+    const double y_95 = height - 0.95 * height;
+
+    cairo_move_to(cr, 0, y_95);
+    cairo_line_to(cr, width, y_95);
+    cairo_stroke(cr);
+
+    if (!complete || !coh) {
+        cairo_set_source_rgb(cr, 0.6, 0.6, 0.6);
+        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(cr, 14);
+        cairo_move_to(cr, 20, height / 2.0 - 20);
+        cairo_show_text(cr, "No measurement yet!");
+        return;
+    }
+
+    cairo_set_source_rgb(cr, 0.95, 0.6, 0.9);
+    cairo_set_line_width(cr, 1.6);
+
+    int first = 1;
+    for (int i = 1; i < num_bins; i++) {
+        const double x = (double)i / (num_bins - 1) * width;
+        float v = coh[i];
+        if (v < 0.0f) v = 0.0f;
+        if (v > 1.0f) v = 1.0f;
+
+        const double y = height - v * height;
+        if (first) {
+            cairo_move_to(cr, x, y);
+            first = 0;
+        } else {
+            cairo_line_to(cr, x, y);
+        }
+    }
+    cairo_stroke(cr);
+}
+
+static void on_draw_h12(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
+    (void) area;
+    const GUIState *state = user_data;
+
+    draw_h12_common(cr, width, height, analysis_get_h12_mag_db(), state->num_freq_bins, state->measurement_complete);
+}
+
+static void on_draw_coherence(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
+    (void) area;
+    const GUIState *state = user_data;
+
+    draw_coherence_common(cr, width, height, analysis_get_coherence(), state->num_freq_bins,
+                          state->measurement_complete);
+}
+
+
 //timer callback, updates plots every 50ms
 static gboolean update_plots(gpointer user_data)
 {
@@ -475,14 +599,14 @@ static gboolean update_plots(gpointer user_data)
     int in_ch = audio_get_input_channels();
     if (in_ch < 1) in_ch = 1;
 
-    int samples_wanted = state->fft_size * in_ch;
-    int samples_read = ring_buffer_read(state->rb, state->interleaved_buffer, samples_wanted);
+    const int samples_wanted = state->fft_size * in_ch;
+    const int samples_read = ring_buffer_read(state->rb, state->interleaved_buffer, samples_wanted);
 
     if (samples_read <= 0) {
         return G_SOURCE_CONTINUE;
     }
 
-    int frames_read = samples_read / in_ch;
+    const int frames_read = samples_read / in_ch;
     state->waveform_frames = frames_read;
 
     //Deinterleave
@@ -496,6 +620,7 @@ static gboolean update_plots(gpointer user_data)
     }
 
     //Detect genuine stereo: ch2 must differ meaningfully from ch1
+    //TODO: RMS based channel mode detection
     if (state->channel_mode != CHANNEL_MODE_STEREO && in_ch >= 2) {
         for (int i = 0; i < frames_read; i++) {
             const float diff = fabsf(state->waveform_buffer_ch2[i] - state->waveform_buffer_ch1[i]); //absolute value of 1st argument
@@ -514,6 +639,39 @@ static gboolean update_plots(gpointer user_data)
         compute_spectrum(state->waveform_buffer_ch2, state->spectrum_buffer_ch2, state->fft_size);
     }
 
+    //feed the measurement engine if active
+    if (state->measurement_active) {
+        const int r = measure_feed_block(state->waveform_buffer_ch1, state->waveform_buffer_ch2, frames_read);
+
+        if (r == 1) {
+            //Measurement complete. compute derived quantities
+            analysis_compute(measure_get_G11(), measure_get_G22(), measure_get_G12_real(), measure_get_G12_imag());
+
+            state->measurement_active = 0;
+            state->measurement_complete = 1;
+
+            //force redraw of transfer tab
+            gtk_widget_queue_draw(state->h12_area);
+            gtk_widget_queue_draw(state->coherence_area);
+
+            char status[512];
+            snprintf(status, sizeof(status), "Measurement complete (K=%d segments) | Click 'Measure' to re-acquire", MEASURE_NUM_SEGMENTS);
+
+            gtk_label_set_text(GTK_LABEL(state->status_label), status);
+
+        } else if (r < 0) {
+            state->measurement_active = 0;
+            gtk_label_set_text(GTK_LABEL(state->status_label), "ERROR: Measurement failed");
+
+        } else {
+            //update progress in status bar
+            char status[512];
+            snprintf(status, sizeof(status), "Measuring... %d/%d segments (%d%%)", (measure_get_progress() * MEASURE_NUM_SEGMENTS) / 100, MEASURE_NUM_SEGMENTS, measure_get_progress());
+
+            gtk_label_set_text(GTK_LABEL(state->status_label), status);
+        }
+    }
+
     //Redraw all plots (ch2 areas are hidden in mono mode)
     gtk_widget_queue_draw(state->waveform_area_ch1);
     gtk_widget_queue_draw(state->waveform_area_ch2);
@@ -521,6 +679,35 @@ static gboolean update_plots(gpointer user_data)
     gtk_widget_queue_draw(state->spectrum_area_ch2);
 
     return G_SOURCE_CONTINUE;
+}
+
+static void on_measure_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;
+    GUIState *state = user_data;
+
+    if (!state->is_streaming) {
+        gtk_label_set_text(GTK_LABEL(state->status_label), "Start the stream before measuring.");
+        return;
+    }
+
+    measure_reset();
+    state->measurement_active = 1;
+    state->measurement_complete = 0;
+
+    //clear previous results on transfer tab
+    gtk_widget_queue_draw(state->h12_area);
+    gtk_widget_queue_draw(state->coherence_area);
+
+    char status[512];
+    snprintf(status, sizeof(status), "Measuring... 0/%d segments (0%%)", MEASURE_NUM_SEGMENTS);
+
+    gtk_label_set_text(GTK_LABEL(state->status_label), status);
+
+    //switch to transfer tab so that we see progress
+    GtkWidget *notebook = GTK_WIDGET(gtk_builder_get_object(state->builder, "main_notebook"));
+    if (notebook) {
+        gtk_notebook_set_current_page(GTK_NOTEBOOK(notebook), 1);
+    }
 }
 
 //start/stop button
@@ -587,7 +774,15 @@ static void setup_callbacks(GUIState *state) {
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(state->spectrum_area_ch1), on_draw_spectrum_ch1, state, NULL);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(state->spectrum_area_ch2), on_draw_spectrum_ch2, state, NULL);
 
+    // for transfer tab
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(state->h12_area), on_draw_h12, state, NULL);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(state->coherence_area), on_draw_coherence, state, NULL);
+
+    //buttons
     g_signal_connect(state->start_stop_button, "toggled", G_CALLBACK(on_start_stop_toggled), state);
+    g_signal_connect(state->measure_button, "clicked", G_CALLBACK(on_measure_clicked), state);
+
+    //window
     g_signal_connect(state->window, "close-request", G_CALLBACK(on_window_closed), state);
 }
 
@@ -617,9 +812,16 @@ static void app_activate(GtkApplication *app, const gpointer user_data)
     //Column containers, for hide/show
     state->waveform_col2 = GTK_WIDGET(gtk_builder_get_object(builder, "waveform_col2"));
     state->spectrum_col2 = GTK_WIDGET(gtk_builder_get_object(builder, "spectrum_col2"));
+
+    //Transfer tab widgets
+    state->h12_area = GTK_WIDGET(gtk_builder_get_object(builder, "h12_area"));
+    state->coherence_area = GTK_WIDGET(gtk_builder_get_object(builder, "coherence_area"));
+
+    //control bar widgets
     state->device_combo = GTK_WIDGET(gtk_builder_get_object(builder, "device_combo"));
     state->signal_type_combo = GTK_WIDGET(gtk_builder_get_object(builder, "signal_type_combo"));
     state->start_stop_button = GTK_WIDGET(gtk_builder_get_object(builder, "start_stop_button"));
+    state->measure_button = GTK_WIDGET(gtk_builder_get_object(builder, "measure_button"));
     state->status_label = GTK_WIDGET(gtk_builder_get_object(builder, "status_label"));
 
     //Dialog buttons
@@ -629,9 +831,10 @@ static void app_activate(GtkApplication *app, const gpointer user_data)
 
     if (!state->window || !state->waveform_area_ch1 || !state->waveform_area_ch2 ||
         !state->spectrum_area_ch1 || !state->spectrum_area_ch2 ||
+        !state->h12_area || !state->coherence_area ||
         !state->waveform_col2 || !state->spectrum_col2 ||
         !state->device_combo || !state->signal_type_combo ||
-        !state->start_stop_button || !state->status_label ||
+        !state->start_stop_button || !state->measure_button || !state->status_label ||
         !state->generate_button || !state->cancel_button || !dialog) {
         fprintf(stderr, "app_activate: Failed to get all widgets.\n");
         g_object_unref(builder);
@@ -666,6 +869,10 @@ static void app_activate(GtkApplication *app, const gpointer user_data)
     state->signal_params.is_active = 0;
     state->signal_params.sample_rate = SAMPLE_RATE;
 
+    //init measurement state
+    state->measurement_active = 0;
+    state->measurement_complete = 0;
+
     //Default to Mono mode; will auto-switch to Stereo if detected
     state->channel_mode = CHANNEL_MODE_MONO;
     apply_channel_mode(state);
@@ -689,9 +896,22 @@ int gui_run(const int argc, char **argv, RingBuffer *rb)
         return -1;
     }
 
+    //Init DSP measurement infra
+    if (measure_init() != 0) {
+        fprintf(stderr, "gui_run: measure_init failed\n");
+        return -1;
+    }
+    if (analysis_init(measure_get_num_bins()) != 0) {
+        fprintf(stderr, "gui_run: analysis_init failed\n");
+        measure_free();
+        return -1;
+    }
+
     GUIState *state = calloc(1, sizeof(GUIState));
     if (state == NULL) {
         fprintf(stderr, "gui_run: failed to allocate GUI state\n");
+        measure_free();
+        analysis_free();
         return -1;
     }
 
@@ -720,6 +940,8 @@ int gui_run(const int argc, char **argv, RingBuffer *rb)
         free(state->spectrum_buffer_ch1);
         free(state->spectrum_buffer_ch2);
         free(state);
+        measure_free();
+        analysis_free();
         return -1;
     }
 
@@ -735,7 +957,7 @@ int gui_run(const int argc, char **argv, RingBuffer *rb)
     state->app = app;
     g_signal_connect(app, "activate", G_CALLBACK(app_activate), state);
 
-    int status = g_application_run(G_APPLICATION(app), argc, argv);
+    const int status = g_application_run(G_APPLICATION(app), argc, argv);
 
     g_object_unref(app);
 
@@ -746,6 +968,9 @@ int gui_run(const int argc, char **argv, RingBuffer *rb)
     free(state->spectrum_buffer_ch1);
     free(state->spectrum_buffer_ch2);
     free(state);
+
+    measure_free();
+    analysis_free();
 
     return status;
 }
