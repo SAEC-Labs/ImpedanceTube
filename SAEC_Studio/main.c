@@ -67,8 +67,8 @@ int main(int argc, char **argv) {
     printf("Ok (device: %s)\n", audio_get_device_name());
 
     //measure selftest
-    measure_selftest();
-    return 0; //exite after self test
+    //measure_selftest();
+    //return 0; //exite after self test
 
     //Launch GUI: blocks until window is closed
     printf("Launching GUI...\n\n");
