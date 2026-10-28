@@ -16,46 +16,62 @@
                 <property name="margin-top">5</property>
                 <property name="margin-bottom">5</property>
 
-                <!-- Control Bar -->
+                <!-- ============ Control Bar ============ -->
                 <child>
                     <object class="GtkBox" id="control_box">
                         <property name="orientation">horizontal</property>
-                        <property name="spacing">10</property>
+                        <property name="spacing">12</property>
                         <property name="halign">fill</property>
 
-                        <child>
-                            <object class="GtkLabel" id="signal_type_label">
-                                <property name="label">Signal:</property>
-                            </object>
-                        </child>
-                        <child>
-                            <object class="GtkDropDown" id="signal_type_combo">
-                                <property name="hexpand">True</property>
-                            </object>
-                        </child>
-
-                        <child>
-                            <object class="GtkLabel" id="device_label">
-                                <property name="label">Device:</property>
-                            </object>
-                        </child>
-                        <child>
-                            <object class="GtkDropDown" id="device_combo">
-                                <property name="hexpand">True</property>
-                            </object>
-                        </child>
-
+                        <!-- Buttons first -->
                         <child>
                             <object class="GtkToggleButton" id="start_stop_button">
                                 <property name="label">Start</property>
                                 <property name="hexpand">False</property>
                             </object>
                         </child>
-
                         <child>
                             <object class="GtkButton" id="measure_button">
                                 <property name="label">Measure</property>
                                 <property name="hexpand">False</property>
+                            </object>
+                        </child>
+
+                        <!-- Device group: label + dropdown tightly bound -->
+                        <child>
+                            <object class="GtkBox" id="device_group">
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">6</property>
+                                <property name="hexpand">True</property>
+                                <child>
+                                    <object class="GtkLabel" id="device_label">
+                                        <property name="label">Device:</property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="GtkDropDown" id="device_combo">
+                                        <property name="hexpand">True</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+
+                        <!-- Signal group: label + dropdown tightly bound -->
+                        <child>
+                            <object class="GtkBox" id="signal_group">
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">6</property>
+                                <property name="hexpand">True</property>
+                                <child>
+                                    <object class="GtkLabel" id="signal_type_label">
+                                        <property name="label">Signal:</property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="GtkDropDown" id="signal_type_combo">
+                                        <property name="hexpand">True</property>
+                                    </object>
+                                </child>
                             </object>
                         </child>
                     </object>
