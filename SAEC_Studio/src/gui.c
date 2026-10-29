@@ -85,9 +85,9 @@ static const char* channel_mode_name(int mode)
 }
 
 /* show/hide second channel's plots in Mono mode (working with pc only) */
-static void apply_channel_mode(GUIState *state)
+static void apply_channel_mode(const GUIState *state)
 {
-    gboolean show_ch2 = (state->channel_mode == CHANNEL_MODE_STEREO);
+    const gboolean show_ch2 = (state->channel_mode == CHANNEL_MODE_STEREO);
 
     if (state->waveform_col2) {
         gtk_widget_set_visible(state->waveform_col2, show_ch2);
@@ -98,7 +98,7 @@ static void apply_channel_mode(GUIState *state)
 }
 
 /* rebuild the status label from current state */
-static void refresh_status(GUIState *state)
+static void refresh_status(const GUIState *state)
 {
     static const char *type_names[] = {
         "Sine", "Linear Sweep", "Logarithmic Sweep",
@@ -126,7 +126,7 @@ static int is_pulse_device(const char *name)
 }
 
 //update dialog labels and visibility based on signal type
-static void update_dialog_visibility(GUIState *state)
+static void update_dialog_visibility(const GUIState *state)
 {
     const guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(state->signal_type_combo));
     const char *type_names[] = {
@@ -157,7 +157,7 @@ static void update_dialog_visibility(GUIState *state)
     gtk_widget_set_visible(future_box, selected == 5); //future brownian
 }
 
-static void show_signal_dialog(GUIState *state)
+static void show_signal_dialog(const GUIState *state)
 {
     GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(state->builder, "signal_params_dialog"));
 
@@ -268,7 +268,7 @@ static void on_dialog_generate(const GtkButton *button, gpointer user_data)
 
 static void on_dialog_cancel(GtkButton *button, gpointer user_data)
 {
-    GUIState *state = user_data;
+    const GUIState *state = user_data;
     GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(state->builder, "signal_params_dialog"));
 
     gtk_widget_set_visible(dialog, FALSE); //hide
@@ -302,7 +302,7 @@ static void on_device_changed(GObject *object, GParamSpec *pspec, gpointer user_
 
 static void on_signal_type_changed(GObject *object, GParamSpec *pspec, gpointer user_data)
 {
-    GUIState *state = (GUIState*) user_data;
+    const GUIState *state = (GUIState*) user_data;
     show_signal_dialog(state);
 }
 
@@ -310,7 +310,7 @@ static void on_signal_type_changed(GObject *object, GParamSpec *pspec, gpointer 
 static void populate_device_combo(GUIState *state)
 {
     GtkStringList *string_list = gtk_string_list_new(NULL);
-    int num_devices = audio_get_device_count();
+    const int num_devices = audio_get_device_count();
 
     for (int i = 0; i < num_devices; i++) {
         const AudioDeviceInfo *info = audio_get_device_info(i);
@@ -378,7 +378,8 @@ static void populate_signal_type_combo(GUIState *state)
  * ----------------------------------------------------------
  */
 
-static void draw_waveform_common(cairo_t *cr, int width, int height, const float *buffer, int frames, double r, double g, double b)
+static void draw_waveform_common(cairo_t *cr, const int width, const int height, const float *buffer,
+    const int frames, const double r, const double g, const double b)
 {
     cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
     cairo_paint(cr);
@@ -388,21 +389,22 @@ static void draw_waveform_common(cairo_t *cr, int width, int height, const float
     cairo_set_source_rgb(cr, r, g, b);
     cairo_set_line_width(cr, 1.5);
 
-    double x_step = (double)width / frames;
-    double y_mid = height / 2.0;
-    double y_scale = height / 2.0;
+    const double x_step = (double)width / frames;
+    const double y_mid = height / 2.0;
+    const double y_scale = height / 2.0;
 
     cairo_move_to(cr, 0, y_mid + buffer[0] * y_scale);
 
     for (int i = 1; i < frames; i++) {
-        double x = i * x_step;
-        double y = y_mid + buffer[i] * y_scale;
+        const double x = i * x_step;
+        const double y = y_mid + buffer[i] * y_scale;
         cairo_line_to(cr, x, y);
     }
     cairo_stroke(cr);
 }
 
-static void draw_spectrum_common(cairo_t *cr, int width, int height, const float *spectrum, int num_bins, double r, double g, double b)
+static void draw_spectrum_common(cairo_t *cr, const int width, const int height, const float *spectrum,
+    const int num_bins, const double r, const double g, const double b)
 {
     cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
     cairo_paint(cr);
@@ -416,8 +418,8 @@ static void draw_spectrum_common(cairo_t *cr, int width, int height, const float
 
     cairo_move_to(cr, 0, height);
     for (int i = 0; i < num_bins; i++) {
-        double x = (double)i / num_bins * width;
-        double y = height - (spectrum[i] / max_val) * (height - 10);
+        const double x = (double)i / num_bins * width;
+        const double y = height - (spectrum[i] / max_val) * (height - 10);
         cairo_line_to(cr, x, y);
     }
 
@@ -439,16 +441,16 @@ static void draw_spectrum_common(cairo_t *cr, int width, int height, const float
  * -------------------------------------------------------------
  */
 
-static void on_draw_waveform_ch1(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data)
+static void on_draw_waveform_ch1(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data)
 {
     (void) area;
-    GUIState *state = user_data;
+    const GUIState *state = user_data;
 
     // Green
     draw_waveform_common(cr, width, height, state->waveform_buffer_ch1, state->waveform_frames, 0.2, 1.0, 0.3);
 }
 
-static void on_draw_waveform_ch2(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data)
+static void on_draw_waveform_ch2(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data)
 {
     (void) area;
     const GUIState *state = user_data;
@@ -457,26 +459,26 @@ static void on_draw_waveform_ch2(GtkDrawingArea *area, cairo_t *cr, int width, i
     draw_waveform_common(cr, width, height, state->waveform_buffer_ch2, state->waveform_frames, 1.0, 0.6, 0.1);
 }
 
-static void on_draw_spectrum_ch1(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data)
+static void on_draw_spectrum_ch1(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data)
 {
     (void) area;
-    GUIState *state = user_data;
+    const GUIState *state = user_data;
 
     //Cyan
     draw_spectrum_common(cr, width, height, state->spectrum_buffer_ch1, state->num_freq_bins, 0.0, 0.8, 1.0);
 }
 
-static void on_draw_spectrum_ch2(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data)
+static void on_draw_spectrum_ch2(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data)
 {
     (void) area;
-    GUIState *state = user_data;
+    const GUIState *state = user_data;
 
     //Magenta
     draw_spectrum_common(cr, width, height, state->spectrum_buffer_ch2, state->num_freq_bins, 0.9, 0.3, 0.9);
 }
 
 
-static void draw_h12_common(cairo_t *cr, int width, int height, const float *h12_mag_db, int num_bins, int complete) {
+static void draw_h12_common(cairo_t *cr, const int width, const int height, const float *h12_mag_db, const int num_bins, const int complete) {
     cairo_set_source_rgb(cr, 0.08, 0.08, 0.10);
     cairo_paint(cr);
 
@@ -527,7 +529,7 @@ static void draw_h12_common(cairo_t *cr, int width, int height, const float *h12
     cairo_stroke(cr);
 }
 
-static void draw_coherence_common(cairo_t *cr, int width, int height, const float *coh, int num_bins, int complete) {
+static void draw_coherence_common(cairo_t *cr, const int width, const int height, const float *coh, const int num_bins, const int complete) {
     cairo_set_source_rgb(cr, 0.08, 0.08, 0.10);
     cairo_paint(cr);
 
@@ -571,14 +573,14 @@ static void draw_coherence_common(cairo_t *cr, int width, int height, const floa
     cairo_stroke(cr);
 }
 
-static void on_draw_h12(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
+static void on_draw_h12(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data) {
     (void) area;
     const GUIState *state = user_data;
 
     draw_h12_common(cr, width, height, analysis_get_h12_mag_db(), state->num_freq_bins, state->measurement_complete);
 }
 
-static void on_draw_coherence(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
+static void on_draw_coherence(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data) {
     (void) area;
     const GUIState *state = user_data;
 
@@ -621,15 +623,33 @@ static gboolean update_plots(gpointer user_data)
 
     //Detect genuine stereo: ch2 must differ meaningfully from ch1
     //TODO: RMS based channel mode detection
-    if (state->channel_mode != CHANNEL_MODE_STEREO && in_ch >= 2) {
+    if (state->channel_mode != CHANNEL_MODE_STEREO && in_ch >= 2 && frames_read > 0) {
+        float rms1 = 0.0f, rms2 = 0.0f, rms_diff = 0.0f;
         for (int i = 0; i < frames_read; i++) {
-            const float diff = fabsf(state->waveform_buffer_ch2[i] - state->waveform_buffer_ch1[i]); //absolute value of 1st argument
-            if (diff > 1e-4f) {
-                state->channel_mode = CHANNEL_MODE_STEREO;
-                apply_channel_mode(state);
-                refresh_status(state);
-                break;
-            }
+            float c1 = state->waveform_buffer_ch1[i];
+            float c2 = state->waveform_buffer_ch2[i];
+            float d = c1 - c2;
+            rms1 += c1 * c1;
+            rms2 += c2 * c2;
+            rms_diff += d * d;
+        }
+        const float inv = 1.0f / (float)frames_read;
+        rms1 = sqrtf(rms1 * inv);
+        rms2 = sqrtf(rms2 * inv);
+
+        int is_mono = 0;
+        if (rms1 < 1e-3f && rms2 < 1e-3f) {
+            is_mono = 1;
+        } else if (rms2 < 1e-3f) {
+            is_mono = 1;
+        } else if (rms_diff < 0.1f * rms1) {
+            is_mono = 1;
+        }
+
+        if (!is_mono) {
+            state->channel_mode = CHANNEL_MODE_STEREO;
+            apply_channel_mode(state);
+            refresh_status(state);
         }
     }
 
@@ -681,7 +701,7 @@ static gboolean update_plots(gpointer user_data)
     return G_SOURCE_CONTINUE;
 }
 
-static void on_measure_clicked(GtkButton *button, gpointer user_data) {
+static void on_measure_clicked(const GtkButton *button, gpointer user_data) {
     (void)button;
     GUIState *state = user_data;
 
