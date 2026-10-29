@@ -11,5 +11,6 @@ The Digital Signal Processing folder contains the materials used in writing C co
 2. A simple waveform generator - [https://en.wikipedia.org/wiki/User:Army1987/waveforms.c]
 3. Listen to numerous tones - [https://www.audiocheck.net/testtones_index.php]
 4. **xorshift64** used to generate whitenoise - [https://en.wikipedia.org/wiki/Xorshift]
-
-More will be added.
+5. **GTK4 documentation** - [https://www.gtk.org/docs/]
+6. **Portaudio documentation** - [http://www.portaudio.com/docs/]
+7. **kissfft** docs - [https://github.com/mborgerding/kissfft/blob/master/README.md]
