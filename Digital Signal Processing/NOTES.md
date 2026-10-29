@@ -10,5 +10,6 @@ The Digital Signal Processing folder contains the materials used in writing C co
 1. **Paul Kellet filter bank:7 first-order IIR sections** in parallel, **Filtering white noise to make it pink**, **The Voss algorithm** and much more gold from this old gold mine, including sample code - [https://www.firstpr.com.au/dsp/pink-noise/]
 2. A simple waveform generator - [https://en.wikipedia.org/wiki/User:Army1987/waveforms.c]
 3. Listen to numerous tones - [https://www.audiocheck.net/testtones_index.php]
+4. **xorshift64** used to generate whitenoise - [https://en.wikipedia.org/wiki/Xorshift]
 
 More will be added.
