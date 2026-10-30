@@ -12,5 +12,5 @@ The Digital Signal Processing folder contains the materials used in writing C co
 3. Listen to numerous tones - [https://www.audiocheck.net/testtones_index.php]
 4. **xorshift64** used to generate whitenoise - [https://en.wikipedia.org/wiki/Xorshift]
 5. **GTK4 documentation** - [https://www.gtk.org/docs/]
-6. **Portaudio documentation** - [http://www.portaudio.com/docs/]
+6. **Portaudio documentation** - [https://files.portaudio.com/docs/v19-doxydocs/tutorial_start.html]
 7. **kissfft** docs - [https://github.com/mborgerding/kissfft/blob/master/README.md]
