@@ -27,6 +27,10 @@
 #define MEASURE_NUM_SEGMENTS 32
 #define MEASURE_NUM_BINS (MEASURE_FFT_SIZE / 2 + 1 ) //1025
 
+//runtime safety limit; 3 mins of audio at FFT=2048, SHIFT=1024
+#define MEASURE_SEGMENTS_HARD_CAP 8192
+#include <stdint.h>
+
 typedef enum {
     MEASURE_STATUS_IDLE = 0,
     MEASURE_STATUS_ACCUMULATING,
@@ -51,6 +55,30 @@ void measure_free(void);
  */
 void measure_reset(void);
 
+/**
+ * Configure the target number of averaging segments.
+ * Must be called after measure_reset() and before measure_feed_block().
+ * Values are clamped to [1, MEASURE_SEGMENTS_HARD_CAP].
+ * Setting 0 disables auto-finalization (user must call measure_finish_now()).
+ */
+void measure_set_target_segments(int k);
+
+/**
+ * Get the current target.
+ */
+int measure_get_target_segments(void);
+
+/**
+ * Get the number of segments actually processed so far.
+ */
+int  measure_get_segments_done(void);
+
+
+/**
+ * Get the cumulative number of samples fed since the last reset.
+ * Useful for time-based progress display.
+ */
+uint64_t measure_get_samples_fed(void);
 
 /**
  * Feed a block of samples (one per channel).
@@ -64,6 +92,14 @@ void measure_reset(void);
  * @return  -1 on error, 0 if still accumulating, 1 if measurement complete
  */
 int measure_feed_block(const float *ch1, const float *ch2, int num_samples);
+
+/**
+ * Force finalization with whatever has been accumulated so far.
+ * Use when target_segments == 0 (continuous mode).
+ * @return 0 on success, -1 on error.
+ */
+int  measure_finish_now(void);
+
 
 /**
  * Get current status

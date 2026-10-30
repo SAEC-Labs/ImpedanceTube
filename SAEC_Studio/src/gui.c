@@ -24,6 +24,11 @@
 #define CHANNEL_MODE_MONO 1
 #define CHANNEL_MODE_STEREO 2
 
+/* Maximum number of frames read from the ring buffer per GUI tick.
+ * Must be ≥ (SAMPLE_RATE / tick_rate) to keep up with the audio thread.
+ * With tick = 25 ms (40 Hz), we need ≥ 1103 frames; so we read 4096 (~_~) */
+#define GUI_MAX_READ_FRAMES  (2 * MEASURE_FFT_SIZE)   //4096
+
 //GUI state struct
 typedef struct {
     GtkApplication *app;
@@ -47,11 +52,14 @@ typedef struct {
     RingBuffer *rb;
 
     //buffers
-    float *interleaved_buffer; //FFT_SIZE * NUM_CHANNELS floats
+    float *interleaved_buffer;
+    float *deinterleaved_ch1;
+    float *deinterleaved_ch2;
     float *waveform_buffer_ch1;//FFT_SIZE floats
     float *waveform_buffer_ch2;
     float *spectrum_buffer_ch1; //FFT_SIZE/2 floats
     float *spectrum_buffer_ch2;
+
     int fft_size;
     int num_freq_bins;
     int waveform_frames;
@@ -59,6 +67,8 @@ typedef struct {
     //measurement state
     int measurement_active;
     int measurement_complete;
+    uint64_t target_segments;
+    float target_duration_s;
 
     //Stream state
     int is_streaming;
@@ -589,60 +599,61 @@ static void on_draw_coherence(GtkDrawingArea *area, cairo_t *cr, const int width
 }
 
 
-//timer callback, updates plots every 50ms
 static gboolean update_plots(gpointer user_data)
 {
     GUIState *state = user_data;
 
-    if (!state->is_streaming) {
-        return G_SOURCE_CONTINUE;
-    }
+    if (!state->is_streaming) return G_SOURCE_CONTINUE;
 
     int in_ch = audio_get_input_channels();
     if (in_ch < 1) in_ch = 1;
 
-    const int samples_wanted = state->fft_size * in_ch;
+    //Read a large block – drains the ring buffer
+    const int samples_wanted = GUI_MAX_READ_FRAMES * in_ch;
     const int samples_read = ring_buffer_read(state->rb, state->interleaved_buffer, samples_wanted);
-
-    if (samples_read <= 0) {
-        return G_SOURCE_CONTINUE;
-    }
+    if (samples_read <= 0) return G_SOURCE_CONTINUE;
 
     const int frames_read = samples_read / in_ch;
-    state->waveform_frames = frames_read;
 
-    //Deinterleave
+    //Deinterleave ALL frames
     for (int i = 0; i < frames_read; i++) {
-        state->waveform_buffer_ch1[i] = state->interleaved_buffer[i * in_ch + 0];
-        if (in_ch >= 2) {
-            state->waveform_buffer_ch2[i] = state->interleaved_buffer[i * in_ch + 1];
-        } else {
-            state->waveform_buffer_ch2[i] = 0.0f;
-        }
+        state->deinterleaved_ch1[i] = state->interleaved_buffer[i * in_ch + 0];
+        state->deinterleaved_ch2[i] = (in_ch >= 2)
+            ? state->interleaved_buffer[i * in_ch + 1]
+            : 0.0f;
     }
 
-    //Detect genuine stereo: ch2 must differ meaningfully from ch1
-    //TODO: RMS based channel mode detection
+    //Live display, keep only the most recent FFT_SIZE frames
+    const int display_offset = (frames_read > FFT_SIZE) ? (frames_read - FFT_SIZE) : 0;
+    const int display_count  = (frames_read > FFT_SIZE) ? FFT_SIZE : frames_read;
+    for (int i = 0; i < display_count; i++) {
+        state->waveform_buffer_ch1[i] = state->deinterleaved_ch1[display_offset + i];
+        state->waveform_buffer_ch2[i] = state->deinterleaved_ch2[display_offset + i];
+    }
+    state->waveform_frames = display_count;
+
+    //Channel mode detection (RMS-based, using deinterleaved buffers)
     if (state->channel_mode != CHANNEL_MODE_STEREO && in_ch >= 2 && frames_read > 0) {
         float rms1 = 0.0f, rms2 = 0.0f, rms_diff = 0.0f;
         for (int i = 0; i < frames_read; i++) {
-            float c1 = state->waveform_buffer_ch1[i];
-            float c2 = state->waveform_buffer_ch2[i];
-            float d = c1 - c2;
-            rms1 += c1 * c1;
-            rms2 += c2 * c2;
-            rms_diff += d * d;
+            const float c1 = state->deinterleaved_ch1[i];
+            const float c2 = state->deinterleaved_ch2[i];
+            const float d  = c1 - c2;
+            rms1 += c1*c1; rms2 += c2*c2; rms_diff += d*d;
         }
         const float inv = 1.0f / (float)frames_read;
-        rms1 = sqrtf(rms1 * inv);
-        rms2 = sqrtf(rms2 * inv);
+        rms1 = sqrtf(rms1*inv);
+        rms2 = sqrtf(rms2*inv);
+        rms_diff = sqrtf(rms_diff*inv);
 
         int is_mono = 0;
         if (rms1 < 1e-3f && rms2 < 1e-3f) {
             is_mono = 1;
-        } else if (rms2 < 1e-3f) {
+        }
+        else if (rms2 < 1e-3f) {
             is_mono = 1;
-        } else if (rms_diff < 0.1f * rms1) {
+        }
+        else if (rms_diff < 0.1f * rms1) {
             is_mono = 1;
         }
 
@@ -653,46 +664,55 @@ static gboolean update_plots(gpointer user_data)
         }
     }
 
-    //Compute spectrums
-    if (frames_read >= state->fft_size) {
-        compute_spectrum(state->waveform_buffer_ch1, state->spectrum_buffer_ch1, state->fft_size);
-        compute_spectrum(state->waveform_buffer_ch2, state->spectrum_buffer_ch2, state->fft_size);
+    //Live spectra (from last FFT_SIZE)
+    if (display_count >= FFT_SIZE) {
+        compute_spectrum(state->waveform_buffer_ch1, state->spectrum_buffer_ch1, FFT_SIZE);
+        compute_spectrum(state->waveform_buffer_ch2, state->spectrum_buffer_ch2, FFT_SIZE);
     }
 
-    //feed the measurement engine if active
+    //Measurement, feed all captured frames
     if (state->measurement_active) {
-        const int r = measure_feed_block(state->waveform_buffer_ch1, state->waveform_buffer_ch2, frames_read);
-
+        const int r = measure_feed_block(state->deinterleaved_ch1, state->deinterleaved_ch2, frames_read);
         if (r == 1) {
-            //Measurement complete. compute derived quantities
-            analysis_compute(measure_get_G11(), measure_get_G22(), measure_get_G12_real(), measure_get_G12_imag());
-
-            state->measurement_active = 0;
+            analysis_compute(measure_get_G11(),
+                             measure_get_G22(),
+                             measure_get_G12_real(),
+                             measure_get_G12_imag());
+            state->measurement_active   = 0;
             state->measurement_complete = 1;
 
-            //force redraw of transfer tab
             gtk_widget_queue_draw(state->h12_area);
             gtk_widget_queue_draw(state->coherence_area);
 
             char status[512];
-            snprintf(status, sizeof(status), "Measurement complete (K=%d segments) | Click 'Measure' to re-acquire", MEASURE_NUM_SEGMENTS);
-
+            snprintf(status, sizeof(status),
+                     "Measurement complete (%d segments, %.1f s)  |  Click 'Measure' to re-acquire",
+                     measure_get_segments_done(), state->target_duration_s);
             gtk_label_set_text(GTK_LABEL(state->status_label), status);
 
         } else if (r < 0) {
             state->measurement_active = 0;
-            gtk_label_set_text(GTK_LABEL(state->status_label), "ERROR: Measurement failed");
-
+            gtk_label_set_text(GTK_LABEL(state->status_label),
+                               "ERROR: measurement feed failed");
         } else {
-            //update progress in status bar
-            char status[512];
-            snprintf(status, sizeof(status), "Measuring... %d/%d segments (%d%%)", (measure_get_progress() * MEASURE_NUM_SEGMENTS) / 100, MEASURE_NUM_SEGMENTS, measure_get_progress());
+            //Time-based progress
+            const uint64_t fed = measure_get_samples_fed();
+            const float elapsed_s = (float)fed / (float)SAMPLE_RATE;
+            float pct = 100.0f * elapsed_s / state->target_duration_s; //
 
+            if (pct > 100.0f) pct = 100.0f;
+
+            char status[512];
+            snprintf(status, sizeof(status),
+                     "Measuring… %.1f / %.1f s (%.0f%%)  |  K=%d/%d",
+                     elapsed_s, state->target_duration_s, pct,
+                     measure_get_segments_done(),
+                     measure_get_target_segments());
             gtk_label_set_text(GTK_LABEL(state->status_label), status);
         }
     }
 
-    //Redraw all plots (ch2 areas are hidden in mono mode)
+    //Redraw live plots
     gtk_widget_queue_draw(state->waveform_area_ch1);
     gtk_widget_queue_draw(state->waveform_area_ch2);
     gtk_widget_queue_draw(state->spectrum_area_ch1);
@@ -710,24 +730,75 @@ static void on_measure_clicked(const GtkButton *button, gpointer user_data) {
         return;
     }
 
+    //determine target duration based on generated signal
+    float duration_s;
+    int is_sweep = 0;
+
+    switch (state->signal_params.type) {
+        case SIGNAL_LINEAR_SWEEP:
+        case SIGNAL_LOG_SWEEP:
+            duration_s = state->signal_params.sweep_duration;
+            is_sweep = 1;
+            break;
+        case SIGNAL_SINE:
+        case SIGNAL_WHITE_NOISE:
+        case SIGNAL_PINK_NOISE:
+        case SIGNAL_BROWNIAN_NOISE:
+        default:
+            duration_s = 5.0f; //default for stationary signals
+            break;
+    }
+    if (duration_s < 1.0f) {
+        duration_s = 1.0f;
+    }
+
+    //convert duration to target segment count
+    const uint64_t target_samples = duration_s * (float)SAMPLE_RATE;
+    int target_segments;
+
+    if (target_samples <= MEASURE_FFT_SIZE) {
+        target_segments = 1;
+    } else {
+        target_segments = 1 + (int)((target_samples - MEASURE_FFT_SIZE) / MEASURE_SHIFT);
+    }
+
+    if (target_segments < 4) target_segments = 4;
+    if (target_segments > MEASURE_SEGMENTS_HARD_CAP) {
+        target_segments = MEASURE_SEGMENTS_HARD_CAP;
+
+        //Recompute the actual durstion we'll measure
+        duration_s = (float)(MEASURE_FFT_SIZE + (uint64_t)(target_segments - 1) * MEASURE_SHIFT) / (float)SAMPLE_RATE;
+    }
+
+    //reset measurenmet, config target
     measure_reset();
+    measure_set_target_segments(target_segments);
+
     state->measurement_active = 1;
     state->measurement_complete = 0;
+    state->target_segments = (uint64_t)target_segments;
+    state->target_duration_s = duration_s;
 
     //clear previous results on transfer tab
     gtk_widget_queue_draw(state->h12_area);
     gtk_widget_queue_draw(state->coherence_area);
 
-    char status[512];
-    snprintf(status, sizeof(status), "Measuring... 0/%d segments (0%%)", MEASURE_NUM_SEGMENTS);
-
-    gtk_label_set_text(GTK_LABEL(state->status_label), status);
+    //for sweeps, trigger playback so that sweep and capture start together
+    if (is_sweep) {
+        state->signal_params.is_active = 1;
+        audio_update_signal_params(&state->signal_params);
+    }
 
     //switch to transfer tab so that we see progress
     GtkWidget *notebook = GTK_WIDGET(gtk_builder_get_object(state->builder, "main_notebook"));
     if (notebook) {
         gtk_notebook_set_current_page(GTK_NOTEBOOK(notebook), 1);
     }
+
+    char status[512];
+    snprintf(status, sizeof(status), "Measuring... 0.0 / %.1f  s (target: %d segments)", duration_s, target_segments);
+
+    gtk_label_set_text(GTK_LABEL(state->status_label), status);
 }
 
 //start/stop button
@@ -909,8 +980,8 @@ static void app_activate(GtkApplication *app, const gpointer user_data)
     //Auto-start stream
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(state->start_stop_button), TRUE);
 
-    //Start update timer (50ms)
-    g_timeout_add(50, update_plots, state);
+    //Start update timer. 25ms = 40Hz to ensure we drain >= 2x audio production rate
+    g_timeout_add(25, update_plots, state);
 }
 
 
@@ -944,22 +1015,27 @@ int gui_run(const int argc, char **argv, RingBuffer *rb)
     state->fft_size = FFT_SIZE;
     state->num_freq_bins = FFT_SIZE / 2;
     state->is_streaming = 0;
+
     state->channel_mode = CHANNEL_MODE_MONO;
 
     //Allocate all buffers
-    state->interleaved_buffer = (float*) malloc(FFT_SIZE * NUM_CHANNELS * sizeof(float));
-    state->waveform_buffer_ch1 = (float*) malloc(FFT_SIZE * sizeof(float));
-    state->waveform_buffer_ch2 = (float*) malloc(FFT_SIZE * sizeof(float));
-    state->spectrum_buffer_ch1 = (float*) malloc((FFT_SIZE / 2) * sizeof(float));
-    state->spectrum_buffer_ch2 = (float*) malloc((FFT_SIZE / 2) * sizeof(float));
+    state->interleaved_buffer  = (float*)malloc(GUI_MAX_READ_FRAMES * NUM_CHANNELS * sizeof(float));
+    state->deinterleaved_ch1   = (float*)malloc(GUI_MAX_READ_FRAMES * sizeof(float));
+    state->deinterleaved_ch2   = (float*)malloc(GUI_MAX_READ_FRAMES * sizeof(float));
+    state->waveform_buffer_ch1 = (float*)malloc(FFT_SIZE * sizeof(float));
+    state->waveform_buffer_ch2 = (float*)malloc(FFT_SIZE * sizeof(float));
+    state->spectrum_buffer_ch1 = (float*)malloc((FFT_SIZE / 2) * sizeof(float));
+    state->spectrum_buffer_ch2 = (float*)malloc((FFT_SIZE / 2) * sizeof(float));
 
-    if (!state->interleaved_buffer || !state->waveform_buffer_ch1 ||
+    if (!state->interleaved_buffer  || !state->deinterleaved_ch1 ||
+        !state->deinterleaved_ch2   || !state->waveform_buffer_ch1 ||
         !state->waveform_buffer_ch2 || !state->spectrum_buffer_ch1 ||
         !state->spectrum_buffer_ch2) {
-        fprintf(stderr, "gui_run: failed to allocate plot buffers\n");
+        fprintf(stderr, "gui_run: buffer allocation failed\n");
 
-        //make sure to free() all
         free(state->interleaved_buffer);
+        free(state->deinterleaved_ch1);
+        free(state->deinterleaved_ch2);
         free(state->waveform_buffer_ch1);
         free(state->waveform_buffer_ch2);
         free(state->spectrum_buffer_ch1);
@@ -968,15 +1044,22 @@ int gui_run(const int argc, char **argv, RingBuffer *rb)
         measure_free();
         analysis_free();
         return -1;
-    }
+        }
 
-    //Clear all
-    memset(state->interleaved_buffer, 0, FFT_SIZE * NUM_CHANNELS * sizeof(float));
+    //Clear all buffers and initialize scalar state
+    memset(state->interleaved_buffer,  0, GUI_MAX_READ_FRAMES * NUM_CHANNELS * sizeof(float));
+    memset(state->deinterleaved_ch1,   0, GUI_MAX_READ_FRAMES * sizeof(float));
+    memset(state->deinterleaved_ch2,   0, GUI_MAX_READ_FRAMES * sizeof(float));
     memset(state->waveform_buffer_ch1, 0, FFT_SIZE * sizeof(float));
     memset(state->waveform_buffer_ch2, 0, FFT_SIZE * sizeof(float));
     memset(state->spectrum_buffer_ch1, 0, (FFT_SIZE / 2) * sizeof(float));
     memset(state->spectrum_buffer_ch2, 0, (FFT_SIZE / 2) * sizeof(float));
+
     state->waveform_frames = 0;
+    state->measurement_active = 0;
+    state->measurement_complete = 0;
+    state->target_segments = 0;
+    state->target_duration_s = 0.0f;
 
     GtkApplication *app = gtk_application_new("com.saecstudio.app", G_APPLICATION_DEFAULT_FLAGS);
     state->app = app;
@@ -988,6 +1071,8 @@ int gui_run(const int argc, char **argv, RingBuffer *rb)
 
     //Free all buffers
     free(state->interleaved_buffer);
+    free(state->deinterleaved_ch1);
+    free(state->deinterleaved_ch2);
     free(state->waveform_buffer_ch1);
     free(state->waveform_buffer_ch2);
     free(state->spectrum_buffer_ch1);

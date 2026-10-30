@@ -48,6 +48,8 @@ typedef struct {
 
     //state
     int segments_done;
+    int target_segments;
+    uint64_t samples_fed;
     MeasureStatus status;
     int initialized;
 } MeasureContext;
@@ -89,8 +91,12 @@ static void measure_process_segment(void) {
 }
 
 static void measure_finalize(void) {
-    //welch normalization, dividing by (K.W)
-    const double norm = 1.0 / ((double)MEASURE_NUM_SEGMENTS * m_ctx.window_power);
+    if (m_ctx.segments_done == 0) {
+        fprintf(stderr, "measure_finalize: no segments accumulated\n");
+        return;
+    }
+    //welch normalization, by the actual number of segments, not a constant
+    const double norm = 1.0 / ((double)m_ctx.segments_done * m_ctx.window_power);
 
     for (int i = 0; i < MEASURE_NUM_BINS; i++) {
         m_ctx.G11[i] = (float)(m_ctx.acc_S11[i] * norm);
@@ -160,15 +166,17 @@ int measure_init(void) {
 
     m_ctx.samples_filled = 0;
     m_ctx.segments_done = 0;
+    m_ctx.samples_fed = 0;
+    m_ctx.target_segments = MEASURE_NUM_SEGMENTS; //default
     m_ctx.status = MEASURE_STATUS_IDLE;
     m_ctx.initialized = 1;
 
-    printf("measure: initialized (FFT=%d, shift=%d, segments=%d, Hann window)\n", MEASURE_FFT_SIZE, MEASURE_SHIFT, MEASURE_NUM_SEGMENTS);
+    printf("measure: initialized (FFT=%d, shift=%d, default target=%d, segments=%d, hard cap=%d)\n", MEASURE_FFT_SIZE, MEASURE_SHIFT, MEASURE_NUM_SEGMENTS, MEASURE_SEGMENTS_HARD_CAP);
     return 0;
 
 
     fail:
-    fprintf(stderr, "measure_init: failed to allocate memory for FFT\n");
+    fprintf(stderr, "measure_init: failed to allocate memory\n");
     measure_free();
     return -1;
 }
@@ -214,12 +222,33 @@ void measure_reset(void) {
 
     m_ctx.samples_filled = 0;
     m_ctx.segments_done = 0;
+    m_ctx.samples_fed = 0;
     m_ctx.status = MEASURE_STATUS_IDLE;
+    //NOTE: target_segments is intentionally preserved (config)
 
     printf("measure: reset\n");
 }
 
-int measure_feed_block(const float *ch1, const float *ch2, int num_samples) {
+void measure_set_target_segments(int k) {
+    if (!m_ctx.initialized) return;
+
+    if (k < 0) k = 0;
+    if (k > MEASURE_SEGMENTS_HARD_CAP) k = MEASURE_SEGMENTS_HARD_CAP;
+
+    m_ctx.target_segments = k;
+}
+
+int measure_get_target_segments(void) {
+    return m_ctx.target_segments;
+}
+int measure_get_segments_done(void) {
+    return m_ctx.segments_done;
+}
+uint64_t measure_get_samples_fed(void) {
+    return m_ctx.samples_fed;
+}
+
+int measure_feed_block(const float *ch1, const float *ch2, const int num_samples) {
     if (!m_ctx.initialized || !ch1 || !ch2 || num_samples <= 0) {
         return -1;
     }
@@ -235,18 +264,20 @@ int measure_feed_block(const float *ch1, const float *ch2, int num_samples) {
 
     while (pos < num_samples) {
         const int space = MEASURE_FFT_SIZE - m_ctx.samples_filled;
-        int to_copy = (num_samples - pos < space) ? (num_samples - pos) : space;
+        const int to_copy = (num_samples - pos < space) ? (num_samples - pos) : space;
 
         memcpy(m_ctx.work_ch1 + m_ctx.samples_filled, ch1 + pos, to_copy * sizeof(float));
         memcpy(m_ctx.work_ch2 + m_ctx.samples_filled, ch2 + pos, to_copy * sizeof(float));
 
         m_ctx.samples_filled += to_copy;
+        m_ctx.samples_fed += (uint64_t)to_copy;
         pos += to_copy;
 
         if (m_ctx.samples_filled == MEASURE_FFT_SIZE) {
             measure_process_segment();
 
-            if (m_ctx.segments_done >= MEASURE_NUM_SEGMENTS) {
+            //Finalize based on dynamic target
+            if (m_ctx.target_segments > 0 && m_ctx.segments_done >= m_ctx.target_segments) {
                 measure_finalize();
                 return 1; //complete, hopefully (~_~)
             }
@@ -264,6 +295,17 @@ int measure_feed_block(const float *ch1, const float *ch2, int num_samples) {
     return 0;
 }
 
+int measure_finish_now(void) {
+    if (!m_ctx.initialized) return -1;
+    if (m_ctx.status == MEASURE_STATUS_COMPLETE) return 0;
+    if (m_ctx.segments_done == 0) {
+        fprintf(stderr, "measure_finish_now: no segments to finalize\n");
+        return -1;
+    }
+    measure_finalize();
+    return 0;
+}
+
 MeasureStatus measure_get_status(void) {
     return m_ctx.status;
 }
@@ -272,10 +314,11 @@ int measure_get_progress(void) {
     if (m_ctx.status == MEASURE_STATUS_COMPLETE) {
         return 100;
     }
+    if (m_ctx.target_segments <= 0) return 0;
 
-    if (MEASURE_NUM_SEGMENTS <= 0) return 0;
+    const int p = (m_ctx.segments_done * 100) / m_ctx.target_segments;
 
-    return (m_ctx.segments_done * 100) / MEASURE_NUM_SEGMENTS;
+    return p > 100 ? 100 : p;
 }
 
 int measure_get_num_bins(void) {
@@ -287,7 +330,7 @@ const float *measure_get_G22(void) { return m_ctx.G22; }
 const float *measure_get_G12_real(void) { return m_ctx.G12_real; }
 const float *measure_get_G12_imag(void) { return m_ctx.G12_imag; }
 
-float measure_bin_to_hz(int bin, float sample_rate) {
+float measure_bin_to_hz(const int bin, const float sample_rate) {
     return (float)bin * sample_rate / (float)MEASURE_FFT_SIZE;
 }
 
@@ -361,12 +404,11 @@ void measure_selftest(void) {
 
     const double phase_deg = atan2(g12i, g12r) * 180.0 / M_PI;
 
-    printf("[selftest] bin %d (%.1f Hz)\n", bin, measure_bin_to_hz(bin, fs));
-    printf("  G11 = %.6e\n", g11);
-    printf("  G22 = %.6e\n", g22);
-    printf("  G12 = %.6e + j·%.6e\n", g12r, g12i);
-    printf("  Coherence = %.6f   (expect ~1.000)\n", coh);
-    printf("  Phase     = %.4f°  (expect ~0.0)\n", phase_deg);
+    printf("[selftest] bin %d (%.1f Hz), K=%d/%d, samples_fed=%llu\n",
+          bin, measure_bin_to_hz(bin, fs),
+          m_ctx.segments_done, m_ctx.target_segments,
+          (unsigned long long)m_ctx.samples_fed);
+    printf("  Coherence = %.6f  Phase = %.4f°\n", coh, phase_deg);
     printf("[selftest] %s\n", (coh > 0.99) ? "PASSED" : "FAILED");
 
     free(ch1);
