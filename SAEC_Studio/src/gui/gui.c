@@ -16,7 +16,7 @@
 #include <string.h>
 #include <math.h>
 
-#include "analyzer.h"
+#include "dsp/analyzer.h"
 #include "dsp/welch.h"
 #include "plot_axes.h"
 

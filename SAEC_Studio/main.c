@@ -11,7 +11,7 @@
 #include "src/config.h"
 #include "src/ring_buffer.h"
 #include "src/audio.h"
-#include "src/gui.h"
+#include "src/gui/gui.h"
 
 
 //signal handler for nice termination with Ctrl+C
