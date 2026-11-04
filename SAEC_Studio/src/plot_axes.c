@@ -277,8 +277,9 @@ void plot_draw_axes(cairo_t *cr, const PlotFrame *frame, const AxisConfig *x_axi
         cairo_save(cr);
         cairo_translate(cr, cx, cy);
         cairo_rotate(cr, -M_PI / 2.0);
-        cairo_move_to(cr, -ext.width / 2.0 - ext.x_bearing,
-                          ext.height / 2.0 - ext.y_bearing + ext.height / 2.0);
+
+        cairo_move_to(cr, -ext.width / 2.0 - ext.x_bearing, -ext.height / 2.0 - ext.y_bearing);
+
         cairo_show_text(cr, title);
         cairo_restore(cr);
     }
