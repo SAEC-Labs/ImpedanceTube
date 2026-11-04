@@ -18,6 +18,7 @@
 
 #include "analyzer.h"
 #include "dsp/welch.h"
+#include "plot_axes.h"
 
 //channel detection modes
 #define CHANNEL_MODE_UNKNOWN 0
@@ -62,6 +63,7 @@ typedef struct {
 
     int fft_size;
     int num_freq_bins;
+    int measure_num_bins;
     int waveform_frames;
 
     //measurement state
@@ -288,7 +290,7 @@ static void on_dialog_cancel(GtkButton *button, gpointer user_data)
 static void on_device_changed(GObject *object, GParamSpec *pspec, gpointer user_data)
 {
     GUIState *state = user_data;
-    guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(object));
+    const guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(object));
     if (selected == GTK_INVALID_LIST_POSITION) return;
 
     const AudioDeviceInfo *info = audio_get_device_info(selected);
@@ -388,216 +390,263 @@ static void populate_signal_type_combo(GUIState *state)
  * ----------------------------------------------------------
  */
 
-static void draw_waveform_common(cairo_t *cr, const int width, const int height, const float *buffer,
-    const int frames, const double r, const double g, const double b)
-{
-    cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
+static void draw_waveform_common(cairo_t *cr, int width, int height, const float *buffer, int frames, double r, double g, double b, float sample_rate) {
+    cairo_set_source_rgb(cr, 0.08, 0.08, 0.10);
     cairo_paint(cr);
+
+    PlotFrame frame;
+    plot_frame_init(&frame, width, height, 50, 10, 10, 32);
+
+    //time axis always covers the full FFT window, no jitter*/
+    const float duration_ms = (sample_rate > 0.0f) ? (float)FFT_SIZE / sample_rate * 1000.0f : 23.0f;
+
+    const AxisConfig x_axis = { .label = "Time", .unit = "ms", .min_value = 0.0, .max_value = (double)duration_ms, .log_scale = 0, .num_ticks = 5 };
+    const AxisConfig y_axis = { .label = "Amplitude", .unit = "", .min_value = -1.0, .max_value = 1.0, .log_scale = 0, .num_ticks = 5 };
+
+    plot_draw_axes(cr, &frame, &x_axis, &y_axis);
 
     if (frames < 2) return;
 
+    cairo_save(cr);
+    cairo_rectangle(cr, frame.plot_x, frame.plot_y, frame.plot_w, frame.plot_h);
+    cairo_clip(cr);
+
     cairo_set_source_rgb(cr, r, g, b);
     cairo_set_line_width(cr, 1.5);
 
-    const double x_step = (double)width / frames;
-    const double y_mid = height / 2.0;
-    const double y_scale = height / 2.0;
-
-    cairo_move_to(cr, 0, y_mid + buffer[0] * y_scale);
-
-    for (int i = 1; i < frames; i++) {
-        const double x = i * x_step;
-        const double y = y_mid + buffer[i] * y_scale;
-        cairo_line_to(cr, x, y);
+    for (int i = 0; i < frames; i++) {
+        const double t_ms = (sample_rate > 0.0f) ? (double)i / sample_rate * 1000.0 : 0.0;
+        const double px = plot_map_x(&frame, &x_axis, t_ms);
+        const double py = plot_map_y(&frame, &y_axis, (double)buffer[i]);
+        if (i == 0) {
+            cairo_move_to(cr, px, py);
+        }else {
+            cairo_line_to(cr, px, py);
+        }
     }
     cairo_stroke(cr);
+    cairo_restore(cr);
 }
 
-static void draw_spectrum_common(cairo_t *cr, const int width, const int height, const float *spectrum,
-    const int num_bins, const double r, const double g, const double b)
-{
-    cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
+static void draw_spectrum_common(cairo_t *cr, int width, int height, const float *spectrum, int num_bins, double r, double g, double b, float sample_rate) {
+    cairo_set_source_rgb(cr, 0.08, 0.08, 0.10);
     cairo_paint(cr);
 
-    if (spectrum == NULL || num_bins < 2) return;
+    PlotFrame frame;
+    plot_frame_init(&frame, width, height, 60, 10, 15, 40);
 
-    float max_val = 0.001f;
-    for (int i = 0; i < num_bins; i++) {
-        if (spectrum[i] > max_val) max_val = spectrum[i];
+    //Peak (skip DC bin 0)
+    float max_val = 1e-4f;
+    for (int i = 1; i < num_bins; i++)
+        if (spectrum[i] > max_val) {
+            max_val = spectrum[i];
+        }
+
+    //quantize Y max to 1-2-5 decade steps -> stable tick labels
+    const double exponent = floor(log10((double)max_val));
+    const double mantissa = (double)max_val / pow(10.0, exponent);
+    double nice_mantissa; // (~_~)
+
+    if (mantissa <= 1.0) {
+        nice_mantissa = 1.0;
+    } else if (mantissa <= 2.0) {
+        nice_mantissa = 2.0;
+    } else if (mantissa <= 5.0) {
+        nice_mantissa = 5.0;
+    }else {
+        nice_mantissa = 10.0;
     }
+    const double nice_max = nice_mantissa * pow(10.0, exponent);
 
-    cairo_move_to(cr, 0, height);
-    for (int i = 0; i < num_bins; i++) {
-        const double x = (double)i / num_bins * width;
-        const double y = height - (spectrum[i] / max_val) * (height - 10);
-        cairo_line_to(cr, x, y);
-    }
+    const double nyquist = (double)sample_rate * 0.5;
 
-    cairo_line_to(cr, width, height);
-    cairo_close_path(cr);
+    //log-frequency axis must have min > 0 to avoid NaN
+    const AxisConfig x_axis = { .label = "Frequency", .unit = "Hz", .min_value = 20.0, .max_value = nyquist, .log_scale = 1, .num_ticks = 0 };
+    const AxisConfig y_axis = { .label = "Magnitude", .unit = "", .min_value = 0.0, .max_value = nice_max, .log_scale = 0, .num_ticks = 5 };
 
-    //subtle fill, semi transparent darker version of line colour
-    cairo_set_source_rgba(cr, r * 0.4, g * 0.4, b * 0.4, 0.4);
-    cairo_fill_preserve(cr);
+    plot_draw_axes(cr, &frame, &x_axis, &y_axis);
 
-    //bright stroke
+    cairo_save(cr);
+    cairo_rectangle(cr, frame.plot_x, frame.plot_y, frame.plot_w, frame.plot_h);
+    cairo_clip(cr);
+
     cairo_set_source_rgb(cr, r, g, b);
     cairo_set_line_width(cr, 1.5);
+
+    int started = 0;
+    for (int i = 1; i < num_bins; i++) {
+        const double hz = (double)i * sample_rate / ((double)num_bins * 2.0);
+
+        if (hz < x_axis.min_value) {
+            continue;
+        }
+        const double px = plot_map_x(&frame, &x_axis, hz);
+        const double py = plot_map_y(&frame, &y_axis, (double)spectrum[i]);
+
+        if (!started) {
+            cairo_move_to(cr, px, py); started = 1;
+        }else {
+            cairo_line_to(cr, px, py);
+        }
+    }
     cairo_stroke(cr);
+    cairo_restore(cr);
 }
+
 
 /*--------------------------------------------------------
  * channel-specific drawing callbacks
  * -------------------------------------------------------------
  */
 
-static void on_draw_waveform_ch1(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data)
-{
+static void on_draw_waveform_ch1(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data) {
     (void) area;
-    const GUIState *state = user_data;
+    const GUIState *state = (GUIState*)user_data;
 
-    // Green
-    draw_waveform_common(cr, width, height, state->waveform_buffer_ch1, state->waveform_frames, 0.2, 1.0, 0.3);
+    draw_waveform_common(cr, width, height, state->waveform_buffer_ch1, state->waveform_frames, 0.2, 1.0, 0.3, (float)SAMPLE_RATE);
 }
 
-static void on_draw_waveform_ch2(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data)
-{
+static void on_draw_waveform_ch2(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data) {
     (void) area;
-    const GUIState *state = user_data;
-
-    //Amber
-    draw_waveform_common(cr, width, height, state->waveform_buffer_ch2, state->waveform_frames, 1.0, 0.6, 0.1);
+    const GUIState *state = (GUIState*)user_data;
+    draw_waveform_common(cr, width, height, state->waveform_buffer_ch2, state->waveform_frames, 1.0, 0.6, 0.1, (float)SAMPLE_RATE);
 }
 
-static void on_draw_spectrum_ch1(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data)
-{
+static void on_draw_spectrum_ch1(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data) {
     (void) area;
-    const GUIState *state = user_data;
-
-    //Cyan
-    draw_spectrum_common(cr, width, height, state->spectrum_buffer_ch1, state->num_freq_bins, 0.0, 0.8, 1.0);
+    const GUIState *state = (GUIState*) user_data;
+    draw_spectrum_common(cr, width, height, state->spectrum_buffer_ch1, state->num_freq_bins, 0.0, 0.8, 1.0, (float)SAMPLE_RATE);
 }
 
-static void on_draw_spectrum_ch2(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data)
-{
+static void on_draw_spectrum_ch2(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data) {
     (void) area;
-    const GUIState *state = user_data;
-
-    //Magenta
-    draw_spectrum_common(cr, width, height, state->spectrum_buffer_ch2, state->num_freq_bins, 0.9, 0.3, 0.9);
+    const GUIState *state = (GUIState*) user_data;
+    draw_spectrum_common(cr, width, height, state->spectrum_buffer_ch2, state->num_freq_bins, 0.9, 0.3, 0.9, (float)SAMPLE_RATE);
 }
-
 
 static void draw_h12_common(cairo_t *cr, const int width, const int height, const float *h12_mag_db, const int num_bins, const int complete) {
     cairo_set_source_rgb(cr, 0.08, 0.08, 0.10);
     cairo_paint(cr);
 
-    //reference line at 0 dB
-    cairo_set_source_rgba(cr, 0.4, 0.4, 0.4, 0.6);
-    cairo_set_line_width(cr, 1.0);
+    PlotFrame frame;
+    plot_frame_init(&frame, width, height, 65, 12, 20, 42);
 
-    const double y_0db = height / 2.0;
+    const AxisConfig x_axis = { .label = "Frequency", .unit = "Hz", .min_value = 20.0, .max_value = 22050.0, .log_scale = 1, .num_ticks = 0 };
+    const AxisConfig y_axis = { .label = "Magnitude", .unit = "dB", .min_value = -60.0, .max_value = 20.0, .log_scale = 0, .num_ticks = 5 };
 
-    cairo_move_to(cr, 0, y_0db);
-    cairo_line_to(cr, width, y_0db);
-    cairo_stroke(cr);
+    plot_draw_axes(cr, &frame, &x_axis, &y_axis);
 
     if (!complete || !h12_mag_db) {
-        cairo_set_source_rgb(cr, 0.6, 0.6, 0.6);
+        cairo_set_source_rgb(cr, 0.55, 0.55, 0.60);
         cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
         cairo_set_font_size(cr, 14);
-        cairo_show_text(cr, "Click 'Measure' to acquire H12");
+        cairo_move_to(cr, frame.plot_x + 20, frame.plot_y + frame.plot_h / 2.0 - 10);
+        cairo_show_text(cr, "Click 'Measure' to acquire H\u2081\u2082");
         return;
     }
 
-    //y-axis range: -60dB bottom to +20dB top
-    const float db_top = 20.0f;
-    const float db_bottom = -60.0f;
-    const float db_range = db_top - db_bottom;
+    //Trace
+    cairo_save(cr);
+    cairo_rectangle(cr, frame.plot_x, frame.plot_y, frame.plot_w, frame.plot_h);
+    cairo_clip(cr);
 
-    //plot bins now: 1..num_bins-1 skipping DC
     cairo_set_source_rgb(cr, 0.2, 0.9, 0.7);
     cairo_set_line_width(cr, 1.6);
 
-    int first = 1;
+    int started = 0;
     for (int i = 1; i < num_bins; i++) {
-        const double x = (double)i / (num_bins - 1) * width;
-        float v = h12_mag_db[i];
+        const double hz = (double)i * (double)SAMPLE_RATE / ((double)(num_bins - 1) * 2.0);
+        if (hz < x_axis.min_value) continue;
+        double db = (double)h12_mag_db[i];
+        if (db < -60.0) db = -60.0;
+        if (db >  20.0) db =  20.0;
 
-        if (v < db_bottom) v = db_bottom;
-        if (v > db_top) v = db_top;
-
-        const double y = height - ( v - db_bottom) / db_range * height;
-
-        if (first) {
-            cairo_move_to(cr, x, y);
-            first = 0;
-        } else {
-            cairo_line_to(cr, x, y);
+        const double px = plot_map_x(&frame, &x_axis, hz);
+        const double py = plot_map_y(&frame, &y_axis, db);
+        if (!started) {
+            cairo_move_to(cr, px, py);
+            started = 1;
+        }else {
+            cairo_line_to(cr, px, py);
         }
     }
     cairo_stroke(cr);
+    cairo_restore(cr);
 }
 
 static void draw_coherence_common(cairo_t *cr, const int width, const int height, const float *coh, const int num_bins, const int complete) {
     cairo_set_source_rgb(cr, 0.08, 0.08, 0.10);
     cairo_paint(cr);
 
-    //threshold at 0.95
-    cairo_set_source_rgba(cr, 0.4, 0.6, 0.4, 0.6);
-    cairo_set_line_width(cr, 1.0);
+    PlotFrame frame;
+    plot_frame_init(&frame, width, height, 68, 12, 20, 42);
 
-    const double y_95 = height - 0.95 * height;
+    const AxisConfig x_axis = { .label = "Frequency", .unit = "Hz", .min_value = 20.0, .max_value = 22050.0, .log_scale = 1, .num_ticks = 0 };
+    const AxisConfig y_axis = { .label = "Coherence", .unit = "\u03b3\u00b2", .min_value = 0.0, .max_value = 1.0, .log_scale = 0, .num_ticks = 5 };
 
-    cairo_move_to(cr, 0, y_95);
-    cairo_line_to(cr, width, y_95);
-    cairo_stroke(cr);
+    plot_draw_axes(cr, &frame, &x_axis, &y_axis);
+
+    //Threshold line at γ² = 0.95
+    {
+        const double py = plot_map_y(&frame, &y_axis, 0.95);
+        cairo_save(cr);
+        cairo_set_source_rgba(cr, 0.4, 0.7, 0.4, 0.5);
+        cairo_set_line_width(cr, 1.0);
+        cairo_set_dash(cr, (double[]){4.0, 4.0}, 2, 0.0);
+        cairo_move_to(cr, frame.plot_x, py);
+        cairo_line_to(cr, frame.plot_x + frame.plot_w, py);
+        cairo_stroke(cr);
+        cairo_restore(cr);
+    }
 
     if (!complete || !coh) {
-        cairo_set_source_rgb(cr, 0.6, 0.6, 0.6);
+        cairo_set_source_rgb(cr, 0.55, 0.55, 0.60);
         cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
         cairo_set_font_size(cr, 14);
-        cairo_move_to(cr, 20, height / 2.0 - 20);
-        cairo_show_text(cr, "No measurement yet!");
+        cairo_move_to(cr, frame.plot_x + 20, frame.plot_y + frame.plot_h / 2.0 - 10);
+        cairo_show_text(cr, "No measurement yet");
         return;
     }
+
+    cairo_save(cr);
+    cairo_rectangle(cr, frame.plot_x, frame.plot_y, frame.plot_w, frame.plot_h);
+    cairo_clip(cr);
 
     cairo_set_source_rgb(cr, 0.95, 0.6, 0.9);
     cairo_set_line_width(cr, 1.6);
 
-    int first = 1;
+    int started = 0;
     for (int i = 1; i < num_bins; i++) {
-        const double x = (double)i / (num_bins - 1) * width;
-        float v = coh[i];
-        if (v < 0.0f) v = 0.0f;
-        if (v > 1.0f) v = 1.0f;
+        const double hz = (double)i * (double)SAMPLE_RATE / ((double)(num_bins - 1) * 2.0);
+        if (hz < x_axis.min_value) continue;
+        double v = (double)coh[i];
+        if (v < 0.0) v = 0.0;
+        if (v > 1.0) v = 1.0;
 
-        const double y = height - v * height;
-        if (first) {
-            cairo_move_to(cr, x, y);
-            first = 0;
-        } else {
-            cairo_line_to(cr, x, y);
+        const double px = plot_map_x(&frame, &x_axis, hz);
+        const double py = plot_map_y(&frame, &y_axis, v);
+        if (!started) {
+            cairo_move_to(cr, px, py);
+            started = 1;
+        }else {
+            cairo_line_to(cr, px, py);
         }
     }
     cairo_stroke(cr);
+    cairo_restore(cr);
 }
 
 static void on_draw_h12(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data) {
     (void) area;
-    const GUIState *state = user_data;
-
-    draw_h12_common(cr, width, height, analysis_get_h12_mag_db(), state->num_freq_bins, state->measurement_complete);
+    const GUIState *state = (GUIState*) user_data;
+    draw_h12_common(cr, width, height, analysis_get_h12_mag_db(), state->measure_num_bins, state->measurement_complete);
 }
 
 static void on_draw_coherence(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data) {
     (void) area;
-    const GUIState *state = user_data;
-
-    draw_coherence_common(cr, width, height, analysis_get_coherence(), state->num_freq_bins,
-                          state->measurement_complete);
+    const GUIState *state = (GUIState*) user_data;
+    draw_coherence_common(cr, width, height, analysis_get_coherence(), state->measure_num_bins, state->measurement_complete);
 }
-
 
 static gboolean update_plots(gpointer user_data)
 {
@@ -1014,6 +1063,7 @@ int gui_run(const int argc, char **argv, RingBuffer *rb)
     state->rb = rb;
     state->fft_size = FFT_SIZE;
     state->num_freq_bins = FFT_SIZE / 2;
+    state->measure_num_bins = measure_get_num_bins();
     state->is_streaming = 0;
 
     state->channel_mode = CHANNEL_MODE_MONO;
