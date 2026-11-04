@@ -61,6 +61,8 @@ add_executable(SAEC_Studio main.c
         src/dsp/welch.h
         src/analyzer.c
         src/analyzer.h
+        src/plot_axes.c
+        src/plot_axes.h
 )
 
 # Link the libs
