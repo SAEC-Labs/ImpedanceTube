@@ -31,9 +31,7 @@ It is designed as the software frontend for the acoustic impedance tube project,
 - **Transfer function** – `H12 = S12 / S11` on one-sided spectra
 - **Coherence function** – `γ²(f)` to validate measurement quality
 
-
-![v0.4.0.png](v0.4.0.png)
-        (_**snip: measuring H12 and coherence on TF tab**_)
+![snip_v0.4.0.png](snip_v0.4.0.png)
   
 ## Planned Features
 
@@ -116,7 +114,7 @@ This method builds a native Windows executable inside the MSYS2 UCRT64 environme
 ## Known Issues (_features_)
 1. **Mono** mode on Linux shows two streams (two waveforms & two FFT spectra). This is due to the default PulseAudio
    device that reports two channels even though the pc mic is physically mono, our the detection implemented is rather too fragile, making PulseAudio lock us in **Stereo** mode.
-   RMS-based detection did not resolve this.
+   RMS-based detection does not this everytime.
 
  
 
