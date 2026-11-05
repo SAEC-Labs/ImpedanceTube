@@ -39,8 +39,8 @@ add_executable(SAEC_Studio main.c
         src/audio.c
         src/dsp/dsp.h
         src/dsp/dsp.c
-        src/gui.h
-        src/gui.c
+        src/gui/gui.h
+        src/gui/gui.c
         src/external/kissfft/kiss_fft.h
         src/external/kissfft/kiss_fft.c
         src/external/kissfft/kiss_fftr.h
@@ -59,10 +59,10 @@ add_executable(SAEC_Studio main.c
         ${GRESOURCE_C} # generated C fle
         src/dsp/welch.c
         src/dsp/welch.h
-        src/analyzer.c
-        src/analyzer.h
-        src/plot_axes.c
-        src/plot_axes.h
+        src/dsp/analyzer.c
+        src/dsp/analyzer.h
+        src/gui/plot_axes.c
+        src/gui/plot_axes.h
 )
 
 # Link the libs
