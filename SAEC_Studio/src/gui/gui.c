@@ -7,7 +7,7 @@
 
 #include "gui.h"
 #include "config.h"
-#include "dsp.h"
+#include "dsp/dsp.h"
 #include "audio.h"
 #include <gtk/gtk.h>
 #include <cairo.h>
@@ -16,10 +16,19 @@
 #include <string.h>
 #include <math.h>
 
+#include "dsp/analyzer.h"
+#include "dsp/welch.h"
+#include "plot_axes.h"
+
 //channel detection modes
 #define CHANNEL_MODE_UNKNOWN 0
 #define CHANNEL_MODE_MONO 1
 #define CHANNEL_MODE_STEREO 2
+
+/* Maximum number of frames read from the ring buffer per GUI tick.
+ * Must be ≥ (SAMPLE_RATE / tick_rate) to keep up with the audio thread.
+ * With tick = 25 ms (40 Hz), we need ≥ 1103 frames; so we read 4096 (~_~) */
+#define GUI_MAX_READ_FRAMES  (2 * MEASURE_FFT_SIZE)   //4096
 
 //GUI state struct
 typedef struct {
@@ -29,26 +38,39 @@ typedef struct {
     GtkWidget *waveform_area_ch2;
     GtkWidget *spectrum_area_ch1;
     GtkWidget *spectrum_area_ch2;
+    GtkWidget *h12_area;
+    GtkWidget *coherence_area;
     GtkWidget *waveform_col2; //for hide/show
     GtkWidget *spectrum_col2; //for hide/show
     GtkWidget *status_label;
     GtkWidget *device_combo;
     GtkWidget *signal_type_combo;
     GtkWidget *generate_button;
+    GtkWidget *measure_button;
     GtkWidget *cancel_button;
     GtkWidget *start_stop_button;
     GtkBuilder *builder;
     RingBuffer *rb;
 
     //buffers
-    float *interleaved_buffer; //FFT_SIZE * NUM_CHANNELS floats
+    float *interleaved_buffer;
+    float *deinterleaved_ch1;
+    float *deinterleaved_ch2;
     float *waveform_buffer_ch1;//FFT_SIZE floats
     float *waveform_buffer_ch2;
     float *spectrum_buffer_ch1; //FFT_SIZE/2 floats
     float *spectrum_buffer_ch2;
+
     int fft_size;
     int num_freq_bins;
+    int measure_num_bins;
     int waveform_frames;
+
+    //measurement state
+    int measurement_active;
+    int measurement_complete;
+    uint64_t target_segments;
+    float target_duration_s;
 
     //Stream state
     int is_streaming;
@@ -57,6 +79,8 @@ typedef struct {
     //signal params
     SignalParams signal_params;
 } GUIState;
+
+
 
 /*-------------------------------------------------
  * channel mode heplers
@@ -73,9 +97,9 @@ static const char* channel_mode_name(int mode)
 }
 
 /* show/hide second channel's plots in Mono mode (working with pc only) */
-static void apply_channel_mode(GUIState *state)
+static void apply_channel_mode(const GUIState *state)
 {
-    gboolean show_ch2 = (state->channel_mode == CHANNEL_MODE_STEREO);
+    const gboolean show_ch2 = (state->channel_mode == CHANNEL_MODE_STEREO);
 
     if (state->waveform_col2) {
         gtk_widget_set_visible(state->waveform_col2, show_ch2);
@@ -86,7 +110,7 @@ static void apply_channel_mode(GUIState *state)
 }
 
 /* rebuild the status label from current state */
-static void refresh_status(GUIState *state)
+static void refresh_status(const GUIState *state)
 {
     static const char *type_names[] = {
         "Sine", "Linear Sweep", "Logarithmic Sweep",
@@ -114,9 +138,9 @@ static int is_pulse_device(const char *name)
 }
 
 //update dialog labels and visibility based on signal type
-static void update_dialog_visibility(GUIState *state)
+static void update_dialog_visibility(const GUIState *state)
 {
-    guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(state->signal_type_combo));
+    const guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(state->signal_type_combo));
     const char *type_names[] = {
         "Sine Wave",
         "Linear Sweep",
@@ -145,7 +169,7 @@ static void update_dialog_visibility(GUIState *state)
     gtk_widget_set_visible(future_box, selected == 5); //future brownian
 }
 
-static void show_signal_dialog(GUIState *state)
+static void show_signal_dialog(const GUIState *state)
 {
     GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(state->builder, "signal_params_dialog"));
 
@@ -256,7 +280,7 @@ static void on_dialog_generate(const GtkButton *button, gpointer user_data)
 
 static void on_dialog_cancel(GtkButton *button, gpointer user_data)
 {
-    GUIState *state = user_data;
+    const GUIState *state = user_data;
     GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(state->builder, "signal_params_dialog"));
 
     gtk_widget_set_visible(dialog, FALSE); //hide
@@ -266,7 +290,7 @@ static void on_dialog_cancel(GtkButton *button, gpointer user_data)
 static void on_device_changed(GObject *object, GParamSpec *pspec, gpointer user_data)
 {
     GUIState *state = user_data;
-    guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(object));
+    const guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(object));
     if (selected == GTK_INVALID_LIST_POSITION) return;
 
     const AudioDeviceInfo *info = audio_get_device_info(selected);
@@ -290,7 +314,7 @@ static void on_device_changed(GObject *object, GParamSpec *pspec, gpointer user_
 
 static void on_signal_type_changed(GObject *object, GParamSpec *pspec, gpointer user_data)
 {
-    GUIState *state = (GUIState*) user_data;
+    const GUIState *state = (GUIState*) user_data;
     show_signal_dialog(state);
 }
 
@@ -298,7 +322,7 @@ static void on_signal_type_changed(GObject *object, GParamSpec *pspec, gpointer 
 static void populate_device_combo(GUIState *state)
 {
     GtkStringList *string_list = gtk_string_list_new(NULL);
-    int num_devices = audio_get_device_count();
+    const int num_devices = audio_get_device_count();
 
     for (int i = 0; i < num_devices; i++) {
         const AudioDeviceInfo *info = audio_get_device_info(i);
@@ -357,170 +381,473 @@ static void populate_signal_type_combo(GUIState *state)
     gtk_drop_down_set_selected(GTK_DROP_DOWN(state->signal_type_combo), 0);
     g_object_unref(string_list);
 
-    //TODO: better coonect signal dialog when selection changes
+    //TODO: better connect signal dialog when selection changes
 }
+
 
 /*------------------------------------------------------------
  * Drawing Helpers to be used across channels
  * ----------------------------------------------------------
  */
 
-static void draw_waveform_common(cairo_t *cr, int width, int height, const float *buffer, int frames, double r, double g, double b)
-{
-    cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
+static void draw_waveform_common(cairo_t *cr, int width, int height, const float *buffer, int frames, double r, double g, double b, float sample_rate) {
+    cairo_set_source_rgb(cr, 0.08, 0.08, 0.10);
     cairo_paint(cr);
+
+    PlotFrame frame;
+    plot_frame_init(&frame, width, height, 50, 10, 10, 32);
+
+    //time axis always covers the full FFT window, no jitter*/
+    const float duration_ms = (sample_rate > 0.0f) ? (float)FFT_SIZE / sample_rate * 1000.0f : 23.0f;
+
+    const AxisConfig x_axis = { .label = "Time", .unit = "ms", .min_value = 0.0, .max_value = (double)duration_ms, .log_scale = 0, .num_ticks = 5 };
+    const AxisConfig y_axis = { .label = "Amplitude", .unit = "", .min_value = -1.0, .max_value = 1.0, .log_scale = 0, .num_ticks = 5 };
+
+    plot_draw_axes(cr, &frame, &x_axis, &y_axis);
 
     if (frames < 2) return;
 
+    cairo_save(cr);
+    cairo_rectangle(cr, frame.plot_x, frame.plot_y, frame.plot_w, frame.plot_h);
+    cairo_clip(cr);
+
     cairo_set_source_rgb(cr, r, g, b);
     cairo_set_line_width(cr, 1.5);
 
-    double x_step = (double)width / frames;
-    double y_mid = height / 2.0;
-    double y_scale = height / 2.0;
-
-    cairo_move_to(cr, 0, y_mid + buffer[0] * y_scale);
-
-    for (int i = 1; i < frames; i++) {
-        double x = i * x_step;
-        double y = y_mid + buffer[i] * y_scale;
-        cairo_line_to(cr, x, y);
+    for (int i = 0; i < frames; i++) {
+        const double t_ms = (sample_rate > 0.0f) ? (double)i / sample_rate * 1000.0 : 0.0;
+        const double px = plot_map_x(&frame, &x_axis, t_ms);
+        const double py = plot_map_y(&frame, &y_axis, (double)buffer[i]);
+        if (i == 0) {
+            cairo_move_to(cr, px, py);
+        }else {
+            cairo_line_to(cr, px, py);
+        }
     }
     cairo_stroke(cr);
+    cairo_restore(cr);
 }
 
-static void draw_spectrum_common(cairo_t *cr, int width, int height, const float *spectrum, int num_bins, double r, double g, double b)
-{
-    cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
+static void draw_spectrum_common(cairo_t *cr, int width, int height, const float *spectrum, int num_bins, double r, double g, double b, float sample_rate) {
+    cairo_set_source_rgb(cr, 0.08, 0.08, 0.10);
     cairo_paint(cr);
 
-    if (spectrum == NULL || num_bins < 2) return;
+    PlotFrame frame;
+    plot_frame_init(&frame, width, height, 60, 10, 15, 40);
 
-    float max_val = 0.001f;
-    for (int i = 0; i < num_bins; i++) {
-        if (spectrum[i] > max_val) max_val = spectrum[i];
+    //Peak (skip DC bin 0)
+    float max_val = 1e-4f;
+    for (int i = 1; i < num_bins; i++)
+        if (spectrum[i] > max_val) {
+            max_val = spectrum[i];
+        }
+
+    //quantize Y max to 1-2-5 decade steps -> stable tick labels
+    const double exponent = floor(log10((double)max_val));
+    const double mantissa = (double)max_val / pow(10.0, exponent);
+    double nice_mantissa; // (~_~)
+
+    if (mantissa <= 1.0) {
+        nice_mantissa = 1.0;
+    } else if (mantissa <= 2.0) {
+        nice_mantissa = 2.0;
+    } else if (mantissa <= 5.0) {
+        nice_mantissa = 5.0;
+    }else {
+        nice_mantissa = 10.0;
     }
+    const double nice_max = nice_mantissa * pow(10.0, exponent);
 
-    cairo_move_to(cr, 0, height);
-    for (int i = 0; i < num_bins; i++) {
-        double x = (double)i / num_bins * width;
-        double y = height - (spectrum[i] / max_val) * (height - 10);
-        cairo_line_to(cr, x, y);
-    }
+    const double nyquist = (double)sample_rate * 0.5;
 
-    cairo_line_to(cr, width, height);
-    cairo_close_path(cr);
+    //log-frequency axis must have min > 0 to avoid NaN
+    const AxisConfig x_axis = { .label = "Frequency", .unit = "Hz", .min_value = 20.0, .max_value = nyquist, .log_scale = 1, .num_ticks = 0 };
+    const AxisConfig y_axis = { .label = "Magnitude", .unit = "", .min_value = 0.0, .max_value = nice_max, .log_scale = 0, .num_ticks = 5 };
 
-    //subtle fill, semi transparent darker version of line colour
-    cairo_set_source_rgba(cr, r * 0.4, g * 0.4, b * 0.4, 0.4);
-    cairo_fill_preserve(cr);
+    plot_draw_axes(cr, &frame, &x_axis, &y_axis);
 
-    //bright stroke
+    cairo_save(cr);
+    cairo_rectangle(cr, frame.plot_x, frame.plot_y, frame.plot_w, frame.plot_h);
+    cairo_clip(cr);
+
     cairo_set_source_rgb(cr, r, g, b);
     cairo_set_line_width(cr, 1.5);
+
+    int started = 0;
+    for (int i = 1; i < num_bins; i++) {
+        const double hz = (double)i * sample_rate / ((double)num_bins * 2.0);
+
+        if (hz < x_axis.min_value) {
+            continue;
+        }
+        const double px = plot_map_x(&frame, &x_axis, hz);
+        const double py = plot_map_y(&frame, &y_axis, (double)spectrum[i]);
+
+        if (!started) {
+            cairo_move_to(cr, px, py); started = 1;
+        }else {
+            cairo_line_to(cr, px, py);
+        }
+    }
     cairo_stroke(cr);
+    cairo_restore(cr);
 }
+
 
 /*--------------------------------------------------------
  * channel-specific drawing callbacks
  * -------------------------------------------------------------
  */
 
-static void on_draw_waveform_ch1(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data)
-{
+static void on_draw_waveform_ch1(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data) {
     (void) area;
-    GUIState *state = user_data;
+    const GUIState *state = (GUIState*)user_data;
 
-    // Green
-    draw_waveform_common(cr, width, height, state->waveform_buffer_ch1, state->waveform_frames, 0.2, 1.0, 0.3);
+    draw_waveform_common(cr, width, height, state->waveform_buffer_ch1, state->waveform_frames, 0.2, 1.0, 0.3, (float)SAMPLE_RATE);
 }
 
-static void on_draw_waveform_ch2(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data)
-{
+static void on_draw_waveform_ch2(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data) {
     (void) area;
-    GUIState *state = user_data;
-
-    //Amber
-    draw_waveform_common(cr, width, height, state->waveform_buffer_ch2, state->waveform_frames, 1.0, 0.6, 0.1);
+    const GUIState *state = (GUIState*)user_data;
+    draw_waveform_common(cr, width, height, state->waveform_buffer_ch2, state->waveform_frames, 1.0, 0.6, 0.1, (float)SAMPLE_RATE);
 }
 
-static void on_draw_spectrum_ch1(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data)
-{
+static void on_draw_spectrum_ch1(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data) {
     (void) area;
-    GUIState *state = user_data;
-
-    //Cyan
-    draw_spectrum_common(cr, width, height, state->spectrum_buffer_ch1, state->num_freq_bins, 0.0, 0.8, 1.0);
+    const GUIState *state = (GUIState*) user_data;
+    draw_spectrum_common(cr, width, height, state->spectrum_buffer_ch1, state->num_freq_bins, 0.0, 0.8, 1.0, (float)SAMPLE_RATE);
 }
 
-static void on_draw_spectrum_ch2(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data)
-{
+static void on_draw_spectrum_ch2(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data) {
     (void) area;
-    GUIState *state = user_data;
-
-    //Magenta
-    draw_spectrum_common(cr, width, height, state->spectrum_buffer_ch2, state->num_freq_bins, 0.9, 0.3, 0.9);
+    const GUIState *state = (GUIState*) user_data;
+    draw_spectrum_common(cr, width, height, state->spectrum_buffer_ch2, state->num_freq_bins, 0.9, 0.3, 0.9, (float)SAMPLE_RATE);
 }
 
+static void draw_h12_common(cairo_t *cr, const int width, const int height, const float *h12_mag_db, const int num_bins, const int complete) {
+    cairo_set_source_rgb(cr, 0.08, 0.08, 0.10);
+    cairo_paint(cr);
 
-//timer callback, updates plots every 50ms
+    PlotFrame frame;
+    plot_frame_init(&frame, width, height, 65, 12, 20, 42);
+
+    const AxisConfig x_axis = { .label = "Frequency", .unit = "Hz", .min_value = 20.0, .max_value = 22050.0, .log_scale = 1, .num_ticks = 0 };
+    const AxisConfig y_axis = { .label = "Magnitude", .unit = "dB", .min_value = -60.0, .max_value = 20.0, .log_scale = 0, .num_ticks = 5 };
+
+    plot_draw_axes(cr, &frame, &x_axis, &y_axis);
+
+    if (!complete || !h12_mag_db) {
+        cairo_set_source_rgb(cr, 0.55, 0.55, 0.60);
+        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(cr, 14);
+        cairo_move_to(cr, frame.plot_x + 20, frame.plot_y + frame.plot_h / 2.0 - 10);
+        cairo_show_text(cr, "Click 'Measure' to acquire H\u2081\u2082");
+        return;
+    }
+
+    //Trace
+    cairo_save(cr);
+    cairo_rectangle(cr, frame.plot_x, frame.plot_y, frame.plot_w, frame.plot_h);
+    cairo_clip(cr);
+
+    cairo_set_source_rgb(cr, 0.2, 0.9, 0.7);
+    cairo_set_line_width(cr, 1.6);
+
+    int started = 0;
+    for (int i = 1; i < num_bins; i++) {
+        const double hz = (double)i * (double)SAMPLE_RATE / ((double)(num_bins - 1) * 2.0);
+        if (hz < x_axis.min_value) continue;
+        double db = (double)h12_mag_db[i];
+        if (db < -60.0) db = -60.0;
+        if (db >  20.0) db =  20.0;
+
+        const double px = plot_map_x(&frame, &x_axis, hz);
+        const double py = plot_map_y(&frame, &y_axis, db);
+        if (!started) {
+            cairo_move_to(cr, px, py);
+            started = 1;
+        }else {
+            cairo_line_to(cr, px, py);
+        }
+    }
+    cairo_stroke(cr);
+    cairo_restore(cr);
+}
+
+static void draw_coherence_common(cairo_t *cr, const int width, const int height, const float *coh, const int num_bins, const int complete) {
+    cairo_set_source_rgb(cr, 0.08, 0.08, 0.10);
+    cairo_paint(cr);
+
+    PlotFrame frame;
+    plot_frame_init(&frame, width, height, 68, 12, 20, 42);
+
+    const AxisConfig x_axis = { .label = "Frequency", .unit = "Hz", .min_value = 20.0, .max_value = 22050.0, .log_scale = 1, .num_ticks = 0 };
+    const AxisConfig y_axis = { .label = "Coherence", .unit = "\u03b3\u00b2", .min_value = 0.0, .max_value = 1.0, .log_scale = 0, .num_ticks = 5 };
+
+    plot_draw_axes(cr, &frame, &x_axis, &y_axis);
+
+    //Threshold line at γ² = 0.95
+    {
+        const double py = plot_map_y(&frame, &y_axis, 0.95);
+        cairo_save(cr);
+        cairo_set_source_rgba(cr, 0.4, 0.7, 0.4, 0.5);
+        cairo_set_line_width(cr, 1.0);
+        cairo_set_dash(cr, (double[]){4.0, 4.0}, 2, 0.0);
+        cairo_move_to(cr, frame.plot_x, py);
+        cairo_line_to(cr, frame.plot_x + frame.plot_w, py);
+        cairo_stroke(cr);
+        cairo_restore(cr);
+    }
+
+    if (!complete || !coh) {
+        cairo_set_source_rgb(cr, 0.55, 0.55, 0.60);
+        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(cr, 14);
+        cairo_move_to(cr, frame.plot_x + 20, frame.plot_y + frame.plot_h / 2.0 - 10);
+        cairo_show_text(cr, "No measurement yet");
+        return;
+    }
+
+    cairo_save(cr);
+    cairo_rectangle(cr, frame.plot_x, frame.plot_y, frame.plot_w, frame.plot_h);
+    cairo_clip(cr);
+
+    cairo_set_source_rgb(cr, 0.95, 0.6, 0.9);
+    cairo_set_line_width(cr, 1.6);
+
+    int started = 0;
+    for (int i = 1; i < num_bins; i++) {
+        const double hz = (double)i * (double)SAMPLE_RATE / ((double)(num_bins - 1) * 2.0);
+        if (hz < x_axis.min_value) continue;
+        double v = (double)coh[i];
+        if (v < 0.0) v = 0.0;
+        if (v > 1.0) v = 1.0;
+
+        const double px = plot_map_x(&frame, &x_axis, hz);
+        const double py = plot_map_y(&frame, &y_axis, v);
+        if (!started) {
+            cairo_move_to(cr, px, py);
+            started = 1;
+        }else {
+            cairo_line_to(cr, px, py);
+        }
+    }
+    cairo_stroke(cr);
+    cairo_restore(cr);
+}
+
+static void on_draw_h12(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data) {
+    (void) area;
+    const GUIState *state = (GUIState*) user_data;
+    draw_h12_common(cr, width, height, analysis_get_h12_mag_db(), state->measure_num_bins, state->measurement_complete);
+}
+
+static void on_draw_coherence(GtkDrawingArea *area, cairo_t *cr, const int width, const int height, gpointer user_data) {
+    (void) area;
+    const GUIState *state = (GUIState*) user_data;
+    draw_coherence_common(cr, width, height, analysis_get_coherence(), state->measure_num_bins, state->measurement_complete);
+}
+
 static gboolean update_plots(gpointer user_data)
 {
     GUIState *state = user_data;
 
-    if (!state->is_streaming) {
-        return G_SOURCE_CONTINUE;
-    }
+    if (!state->is_streaming) return G_SOURCE_CONTINUE;
 
     int in_ch = audio_get_input_channels();
     if (in_ch < 1) in_ch = 1;
 
-    int samples_wanted = state->fft_size * in_ch;
-    int samples_read = ring_buffer_read(state->rb, state->interleaved_buffer, samples_wanted);
+    //Read a large block – drains the ring buffer
+    const int samples_wanted = GUI_MAX_READ_FRAMES * in_ch;
+    const int samples_read = ring_buffer_read(state->rb, state->interleaved_buffer, samples_wanted);
+    if (samples_read <= 0) return G_SOURCE_CONTINUE;
 
-    if (samples_read <= 0) {
-        return G_SOURCE_CONTINUE;
-    }
+    const int frames_read = samples_read / in_ch;
 
-    int frames_read = samples_read / in_ch;
-    state->waveform_frames = frames_read;
-
-    //Deinterleave
+    //Deinterleave ALL frames
     for (int i = 0; i < frames_read; i++) {
-        state->waveform_buffer_ch1[i] = state->interleaved_buffer[i * in_ch + 0];
-        if (in_ch >= 2) {
-            state->waveform_buffer_ch2[i] = state->interleaved_buffer[i * in_ch + 1];
-        } else {
-            state->waveform_buffer_ch2[i] = 0.0f;
-        }
+        state->deinterleaved_ch1[i] = state->interleaved_buffer[i * in_ch + 0];
+        state->deinterleaved_ch2[i] = (in_ch >= 2)
+            ? state->interleaved_buffer[i * in_ch + 1]
+            : 0.0f;
     }
 
-    //Detect genuine stereo: ch2 must differ meaningfully from ch1
-    if (state->channel_mode != CHANNEL_MODE_STEREO && in_ch >= 2) {
+    //Live display, keep only the most recent FFT_SIZE frames
+    const int display_offset = (frames_read > FFT_SIZE) ? (frames_read - FFT_SIZE) : 0;
+    const int display_count  = (frames_read > FFT_SIZE) ? FFT_SIZE : frames_read;
+    for (int i = 0; i < display_count; i++) {
+        state->waveform_buffer_ch1[i] = state->deinterleaved_ch1[display_offset + i];
+        state->waveform_buffer_ch2[i] = state->deinterleaved_ch2[display_offset + i];
+    }
+    state->waveform_frames = display_count;
+
+    //Channel mode detection (RMS-based, using deinterleaved buffers)
+    if (state->channel_mode != CHANNEL_MODE_STEREO && in_ch >= 2 && frames_read > 0) {
+        float rms1 = 0.0f, rms2 = 0.0f, rms_diff = 0.0f;
         for (int i = 0; i < frames_read; i++) {
-            const float diff = fabsf(state->waveform_buffer_ch2[i] - state->waveform_buffer_ch1[i]); //absolute value of 1st argument
-            if (diff > 1e-4f) {
-                state->channel_mode = CHANNEL_MODE_STEREO;
-                apply_channel_mode(state);
-                refresh_status(state);
-                break;
-            }
+            const float c1 = state->deinterleaved_ch1[i];
+            const float c2 = state->deinterleaved_ch2[i];
+            const float d  = c1 - c2;
+            rms1 += c1*c1; rms2 += c2*c2; rms_diff += d*d;
+        }
+        const float inv = 1.0f / (float)frames_read;
+        rms1 = sqrtf(rms1*inv);
+        rms2 = sqrtf(rms2*inv);
+        rms_diff = sqrtf(rms_diff*inv);
+
+        int is_mono = 0;
+        if (rms1 < 1e-3f && rms2 < 1e-3f) {
+            is_mono = 1;
+        }
+        else if (rms2 < 1e-3f) {
+            is_mono = 1;
+        }
+        else if (rms_diff < 0.1f * rms1) {
+            is_mono = 1;
+        }
+
+        if (!is_mono) {
+            state->channel_mode = CHANNEL_MODE_STEREO;
+            apply_channel_mode(state);
+            refresh_status(state);
         }
     }
 
-    //Compute spectrums
-    if (frames_read >= state->fft_size) {
-        compute_spectrum(state->waveform_buffer_ch1, state->spectrum_buffer_ch1, state->fft_size);
-        compute_spectrum(state->waveform_buffer_ch2, state->spectrum_buffer_ch2, state->fft_size);
+    //Live spectra (from last FFT_SIZE)
+    if (display_count >= FFT_SIZE) {
+        compute_spectrum(state->waveform_buffer_ch1, state->spectrum_buffer_ch1, FFT_SIZE);
+        compute_spectrum(state->waveform_buffer_ch2, state->spectrum_buffer_ch2, FFT_SIZE);
     }
 
-    //Redraw all plots (ch2 areas are hidden in mono mode)
+    //Measurement, feed all captured frames
+    if (state->measurement_active) {
+        const int r = measure_feed_block(state->deinterleaved_ch1, state->deinterleaved_ch2, frames_read);
+        if (r == 1) {
+            analysis_compute(measure_get_G11(),
+                             measure_get_G22(),
+                             measure_get_G12_real(),
+                             measure_get_G12_imag());
+            state->measurement_active   = 0;
+            state->measurement_complete = 1;
+
+            gtk_widget_queue_draw(state->h12_area);
+            gtk_widget_queue_draw(state->coherence_area);
+
+            char status[512];
+            snprintf(status, sizeof(status),
+                     "Measurement complete (%d segments, %.1f s)  |  Click 'Measure' to re-acquire",
+                     measure_get_segments_done(), state->target_duration_s);
+            gtk_label_set_text(GTK_LABEL(state->status_label), status);
+
+        } else if (r < 0) {
+            state->measurement_active = 0;
+            gtk_label_set_text(GTK_LABEL(state->status_label),
+                               "ERROR: measurement feed failed");
+        } else {
+            //Time-based progress
+            const uint64_t fed = measure_get_samples_fed();
+            const float elapsed_s = (float)fed / (float)SAMPLE_RATE;
+            float pct = 100.0f * elapsed_s / state->target_duration_s; //
+
+            if (pct > 100.0f) pct = 100.0f;
+
+            char status[512];
+            snprintf(status, sizeof(status),
+                     "Measuring… %.1f / %.1f s (%.0f%%)  |  K=%d/%d",
+                     elapsed_s, state->target_duration_s, pct,
+                     measure_get_segments_done(),
+                     measure_get_target_segments());
+            gtk_label_set_text(GTK_LABEL(state->status_label), status);
+        }
+    }
+
+    //Redraw live plots
     gtk_widget_queue_draw(state->waveform_area_ch1);
     gtk_widget_queue_draw(state->waveform_area_ch2);
     gtk_widget_queue_draw(state->spectrum_area_ch1);
     gtk_widget_queue_draw(state->spectrum_area_ch2);
 
     return G_SOURCE_CONTINUE;
+}
+
+static void on_measure_clicked(const GtkButton *button, gpointer user_data) {
+    (void)button;
+    GUIState *state = user_data;
+
+    if (!state->is_streaming) {
+        gtk_label_set_text(GTK_LABEL(state->status_label), "Start the stream before measuring.");
+        return;
+    }
+
+    //determine target duration based on generated signal
+    float duration_s;
+    int is_sweep = 0;
+
+    switch (state->signal_params.type) {
+        case SIGNAL_LINEAR_SWEEP:
+        case SIGNAL_LOG_SWEEP:
+            duration_s = state->signal_params.sweep_duration;
+            is_sweep = 1;
+            break;
+        case SIGNAL_SINE:
+        case SIGNAL_WHITE_NOISE:
+        case SIGNAL_PINK_NOISE:
+        case SIGNAL_BROWNIAN_NOISE:
+        default:
+            duration_s = 5.0f; //default for stationary signals
+            break;
+    }
+    if (duration_s < 1.0f) {
+        duration_s = 1.0f;
+    }
+
+    //convert duration to target segment count
+    const uint64_t target_samples = duration_s * (float)SAMPLE_RATE;
+    int target_segments;
+
+    if (target_samples <= MEASURE_FFT_SIZE) {
+        target_segments = 1;
+    } else {
+        target_segments = 1 + (int)((target_samples - MEASURE_FFT_SIZE) / MEASURE_SHIFT);
+    }
+
+    if (target_segments < 4) target_segments = 4;
+    if (target_segments > MEASURE_SEGMENTS_HARD_CAP) {
+        target_segments = MEASURE_SEGMENTS_HARD_CAP;
+
+        //Recompute the actual durstion we'll measure
+        duration_s = (float)(MEASURE_FFT_SIZE + (uint64_t)(target_segments - 1) * MEASURE_SHIFT) / (float)SAMPLE_RATE;
+    }
+
+    //reset measurenmet, config target
+    measure_reset();
+    measure_set_target_segments(target_segments);
+
+    state->measurement_active = 1;
+    state->measurement_complete = 0;
+    state->target_segments = (uint64_t)target_segments;
+    state->target_duration_s = duration_s;
+
+    //clear previous results on transfer tab
+    gtk_widget_queue_draw(state->h12_area);
+    gtk_widget_queue_draw(state->coherence_area);
+
+    //for sweeps, trigger playback so that sweep and capture start together
+    if (is_sweep) {
+        state->signal_params.is_active = 1;
+        audio_update_signal_params(&state->signal_params);
+    }
+
+    //switch to transfer tab so that we see progress
+    GtkWidget *notebook = GTK_WIDGET(gtk_builder_get_object(state->builder, "main_notebook"));
+    if (notebook) {
+        gtk_notebook_set_current_page(GTK_NOTEBOOK(notebook), 1);
+    }
+
+    char status[512];
+    snprintf(status, sizeof(status), "Measuring... 0.0 / %.1f  s (target: %d segments)", duration_s, target_segments);
+
+    gtk_label_set_text(GTK_LABEL(state->status_label), status);
 }
 
 //start/stop button
@@ -587,7 +914,15 @@ static void setup_callbacks(GUIState *state) {
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(state->spectrum_area_ch1), on_draw_spectrum_ch1, state, NULL);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(state->spectrum_area_ch2), on_draw_spectrum_ch2, state, NULL);
 
+    // for transfer tab
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(state->h12_area), on_draw_h12, state, NULL);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(state->coherence_area), on_draw_coherence, state, NULL);
+
+    //buttons
     g_signal_connect(state->start_stop_button, "toggled", G_CALLBACK(on_start_stop_toggled), state);
+    g_signal_connect(state->measure_button, "clicked", G_CALLBACK(on_measure_clicked), state);
+
+    //window
     g_signal_connect(state->window, "close-request", G_CALLBACK(on_window_closed), state);
 }
 
@@ -617,9 +952,16 @@ static void app_activate(GtkApplication *app, const gpointer user_data)
     //Column containers, for hide/show
     state->waveform_col2 = GTK_WIDGET(gtk_builder_get_object(builder, "waveform_col2"));
     state->spectrum_col2 = GTK_WIDGET(gtk_builder_get_object(builder, "spectrum_col2"));
+
+    //Transfer tab widgets
+    state->h12_area = GTK_WIDGET(gtk_builder_get_object(builder, "h12_area"));
+    state->coherence_area = GTK_WIDGET(gtk_builder_get_object(builder, "coherence_area"));
+
+    //control bar widgets
     state->device_combo = GTK_WIDGET(gtk_builder_get_object(builder, "device_combo"));
     state->signal_type_combo = GTK_WIDGET(gtk_builder_get_object(builder, "signal_type_combo"));
     state->start_stop_button = GTK_WIDGET(gtk_builder_get_object(builder, "start_stop_button"));
+    state->measure_button = GTK_WIDGET(gtk_builder_get_object(builder, "measure_button"));
     state->status_label = GTK_WIDGET(gtk_builder_get_object(builder, "status_label"));
 
     //Dialog buttons
@@ -629,9 +971,10 @@ static void app_activate(GtkApplication *app, const gpointer user_data)
 
     if (!state->window || !state->waveform_area_ch1 || !state->waveform_area_ch2 ||
         !state->spectrum_area_ch1 || !state->spectrum_area_ch2 ||
+        !state->h12_area || !state->coherence_area ||
         !state->waveform_col2 || !state->spectrum_col2 ||
         !state->device_combo || !state->signal_type_combo ||
-        !state->start_stop_button || !state->status_label ||
+        !state->start_stop_button || !state->measure_button || !state->status_label ||
         !state->generate_button || !state->cancel_button || !dialog) {
         fprintf(stderr, "app_activate: Failed to get all widgets.\n");
         g_object_unref(builder);
@@ -666,19 +1009,28 @@ static void app_activate(GtkApplication *app, const gpointer user_data)
     state->signal_params.is_active = 0;
     state->signal_params.sample_rate = SAMPLE_RATE;
 
+    //init measurement state
+    state->measurement_active = 0;
+    state->measurement_complete = 0;
+
     //Default to Mono mode; will auto-switch to Stereo if detected
     state->channel_mode = CHANNEL_MODE_MONO;
     apply_channel_mode(state);
 
     refresh_status(state);
 
+    /* Explicitly ensure the window is resizable from all edges.
+     * Some window managers ignore the XML property if other hints are set.
+     */
+    gtk_window_set_resizable(GTK_WINDOW(state->window), TRUE);
+
     gtk_window_present(GTK_WINDOW(state->window));
 
     //Auto-start stream
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(state->start_stop_button), TRUE);
 
-    //Start update timer (50ms)
-    g_timeout_add(50, update_plots, state);
+    //Start update timer. 25ms = 40Hz to ensure we drain >= 2x audio production rate
+    g_timeout_add(25, update_plots, state);
 }
 
 
@@ -689,63 +1041,96 @@ int gui_run(const int argc, char **argv, RingBuffer *rb)
         return -1;
     }
 
+    //Init DSP measurement infra
+    if (measure_init() != 0) {
+        fprintf(stderr, "gui_run: measure_init failed\n");
+        return -1;
+    }
+    if (analysis_init(measure_get_num_bins()) != 0) {
+        fprintf(stderr, "gui_run: analysis_init failed\n");
+        measure_free();
+        return -1;
+    }
+
     GUIState *state = calloc(1, sizeof(GUIState));
     if (state == NULL) {
         fprintf(stderr, "gui_run: failed to allocate GUI state\n");
+        measure_free();
+        analysis_free();
         return -1;
     }
 
     state->rb = rb;
     state->fft_size = FFT_SIZE;
     state->num_freq_bins = FFT_SIZE / 2;
+    state->measure_num_bins = measure_get_num_bins();
     state->is_streaming = 0;
+
     state->channel_mode = CHANNEL_MODE_MONO;
 
     //Allocate all buffers
-    state->interleaved_buffer = (float*) malloc(FFT_SIZE * NUM_CHANNELS * sizeof(float));
-    state->waveform_buffer_ch1 = (float*) malloc(FFT_SIZE * sizeof(float));
-    state->waveform_buffer_ch2 = (float*) malloc(FFT_SIZE * sizeof(float));
-    state->spectrum_buffer_ch1 = (float*) malloc((FFT_SIZE / 2) * sizeof(float));
-    state->spectrum_buffer_ch2 = (float*) malloc((FFT_SIZE / 2) * sizeof(float));
+    state->interleaved_buffer  = (float*)malloc(GUI_MAX_READ_FRAMES * NUM_CHANNELS * sizeof(float));
+    state->deinterleaved_ch1   = (float*)malloc(GUI_MAX_READ_FRAMES * sizeof(float));
+    state->deinterleaved_ch2   = (float*)malloc(GUI_MAX_READ_FRAMES * sizeof(float));
+    state->waveform_buffer_ch1 = (float*)malloc(FFT_SIZE * sizeof(float));
+    state->waveform_buffer_ch2 = (float*)malloc(FFT_SIZE * sizeof(float));
+    state->spectrum_buffer_ch1 = (float*)malloc((FFT_SIZE / 2) * sizeof(float));
+    state->spectrum_buffer_ch2 = (float*)malloc((FFT_SIZE / 2) * sizeof(float));
 
-    if (!state->interleaved_buffer || !state->waveform_buffer_ch1 ||
+    if (!state->interleaved_buffer  || !state->deinterleaved_ch1 ||
+        !state->deinterleaved_ch2   || !state->waveform_buffer_ch1 ||
         !state->waveform_buffer_ch2 || !state->spectrum_buffer_ch1 ||
         !state->spectrum_buffer_ch2) {
-        fprintf(stderr, "gui_run: failed to allocate plot buffers\n");
+        fprintf(stderr, "gui_run: buffer allocation failed\n");
 
-        //make sure to free() all
         free(state->interleaved_buffer);
+        free(state->deinterleaved_ch1);
+        free(state->deinterleaved_ch2);
         free(state->waveform_buffer_ch1);
         free(state->waveform_buffer_ch2);
         free(state->spectrum_buffer_ch1);
         free(state->spectrum_buffer_ch2);
         free(state);
+        measure_free();
+        analysis_free();
         return -1;
-    }
+        }
 
-    //Clear all
-    memset(state->interleaved_buffer, 0, FFT_SIZE * NUM_CHANNELS * sizeof(float));
+    //Clear all buffers and initialize scalar state
+    memset(state->interleaved_buffer,  0, GUI_MAX_READ_FRAMES * NUM_CHANNELS * sizeof(float));
+    memset(state->deinterleaved_ch1,   0, GUI_MAX_READ_FRAMES * sizeof(float));
+    memset(state->deinterleaved_ch2,   0, GUI_MAX_READ_FRAMES * sizeof(float));
     memset(state->waveform_buffer_ch1, 0, FFT_SIZE * sizeof(float));
     memset(state->waveform_buffer_ch2, 0, FFT_SIZE * sizeof(float));
     memset(state->spectrum_buffer_ch1, 0, (FFT_SIZE / 2) * sizeof(float));
     memset(state->spectrum_buffer_ch2, 0, (FFT_SIZE / 2) * sizeof(float));
+
     state->waveform_frames = 0;
+    state->measurement_active = 0;
+    state->measurement_complete = 0;
+    state->target_segments = 0;
+    state->target_duration_s = 0.0f;
 
     GtkApplication *app = gtk_application_new("com.saecstudio.app", G_APPLICATION_DEFAULT_FLAGS);
     state->app = app;
     g_signal_connect(app, "activate", G_CALLBACK(app_activate), state);
 
-    int status = g_application_run(G_APPLICATION(app), argc, argv);
+    const int status = g_application_run(G_APPLICATION(app), argc, argv);
 
     g_object_unref(app);
 
     //Free all buffers
     free(state->interleaved_buffer);
+    free(state->deinterleaved_ch1);
+    free(state->deinterleaved_ch2);
     free(state->waveform_buffer_ch1);
     free(state->waveform_buffer_ch2);
     free(state->spectrum_buffer_ch1);
     free(state->spectrum_buffer_ch2);
     free(state);
+
+    measure_free();
+    analysis_free();
 
     return status;
 }

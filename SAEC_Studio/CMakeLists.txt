@@ -37,8 +37,8 @@ add_executable(SAEC_Studio main.c
         src/ring_buffer.c
         src/audio.h
         src/audio.c
-        src/dsp.h
-        src/dsp.c
+        src/dsp/dsp.h
+        src/dsp/dsp.c
         src/gui.h
         src/gui.c
         src/external/kissfft/kiss_fft.h
@@ -57,6 +57,12 @@ add_executable(SAEC_Studio main.c
         src/signals/pink_noise.c
         src/signals/pink_noise.h
         ${GRESOURCE_C} # generated C fle
+        src/dsp/welch.c
+        src/dsp/welch.h
+        src/analyzer.c
+        src/analyzer.h
+        src/plot_axes.c
+        src/plot_axes.h
 )
 
 # Link the libs

@@ -16,7 +16,7 @@ typedef enum {
     SIGNAL_LOG_SWEEP,
     SIGNAL_WHITE_NOISE,
     SIGNAL_PINK_NOISE,
-    //SIGNAL_BROWNIAN_NOISE
+    SIGNAL_BROWNIAN_NOISE
 } SignalType;
 
 /**

@@ -6,7 +6,7 @@ SAEC Studio is a pure‑C, cross‑platform application for real‑time audio ca
 
 It is designed as the software frontend for the acoustic impedance tube project, and serves as a general‑purpose audio visualizer and the starting point for more advanced DSP applications.
 
-## Implemeted Features
+## Implemented Features
 
 - 🎤 Real‑time microphone capture (default input device & Two-channel SAEC_DAQ)
 - 📈 Live waveform displays (time domain)
@@ -25,16 +25,21 @@ It is designed as the software frontend for the acoustic impedance tube project,
   6. Brownian noise (future)
 - **Dark/Light theme toggle** – for comfortable viewing (activated based on System setting)
 - **STM32 USB Audio support** – replaces PC mic stream with custom SAEC_DAQ streams.
+- **Multi‑tab display** – separate tabs for waveforms, FFT spectra and Transfer Function.
+- **Two-channel (stereo) input signal processing**
+- **Cross‑spectrum & auto‑spectrum** – `S12`, `S11`, `S22` with Welch's spectral averaging
+- **Transfer function** – `H12 = S12 / S11` on one-sided spectra
+- **Coherence function** – `γ²(f)` to validate measurement quality
 
 
-![v0.3.0.png](v0.3.0.png)
-        (_**snip: two channel full-duplex stream; sine wave at 440Hz**_)
+![v0.4.0.png](v0.4.0.png)
+        (_**snip: measuring H12 and coherence on TF tab**_)
   
 ## Planned Features
 
 ### 🖥️ GUI Enhancements
 
-- **Multi‑tab display** – separate tabs for waveform, spectrum, transfer function, absorption coefficient plots. (and axes)
+- **More tab display** – Reflection and absorption coefficient plots. (with axes)
 - **Peak frequency marker** – click‑to‑measure dominant frequency
 - **Data logging** – save raw WAV files, CSV with timestamps, and JSON metadata (sample info)
 - **Export plots** – save waveforms/spectrums as PNG
@@ -42,12 +47,9 @@ It is designed as the software frontend for the acoustic impedance tube project,
 
 ### 📊 Heavy DSP Backend
 
-- **Two‑channel (stereo) and four channel input signal processing**
-- **Cross‑spectrum & auto‑spectrum** – `S12`, `S11`, `S22` with averaging
-- **Transfer function** – `H12 = S12 / S11`
-- **Reflection coefficient** – `R` (complex)
+- **Four channel input signal processing**
+- **Reflection coefficient** – `R`
 - **Normal incidence absorption coefficient** – `α(f) = 1 - |R(f)|²`
-- **Coherence function** – `γ²(f)` to validate measurement quality
 - **Surface impedance** – real and imaginary parts
 - **Frequency‑dependent uncertainty** – confidence intervals based on coherence
 
@@ -103,17 +105,18 @@ This method builds a native Windows executable inside the MSYS2 UCRT64 environme
 4. **Run the `.exe` file**
 
 ## Usage
-1. Plug in a microphone to PC(or use the built‑in one) or Plug in the in-house custom STM32 SAEC_DAQ
+1. Plug in a microphone to PC(or use the built‑in one) or Plug in the in-house custom STM32 SAEC_DAQ for lab experiments.
 2. Launch the software, preferrably via terminal to see stdout and stderr. Click the Start/Stop button.
 3. Open the signal generator dropdown to generate a signal, will play on your inbuilt speaker or plugged in headphones.
     Adjust amplitude and duration and freq ranges for chirps.
 4. Speak, whistle, or make noise, the waveforms and FFT spectrums update live as your speaker outputs the generating signal.
-5. Close the window or press Ctrl+C to exit.
+5. Open Transfer Function tab and click measure button to measure H12 and coherence.
+6. Close the window or press Ctrl+C to exit.
 
 ## Known Issues (_features_)
 1. **Mono** mode on Linux shows two streams (two waveforms & two FFT spectra). This is due to the default PulseAudio
    device that reports two channels even though the pc mic is physically mono, our the detection implemented is rather too fragile, making PulseAudio lock us in **Stereo** mode.
-   RMS-based detection could resolve this.
+   RMS-based detection did not resolve this.
 
  
 

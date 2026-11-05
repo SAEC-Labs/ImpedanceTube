@@ -1,0 +1,426 @@
+//
+// Created by torq on 09/8/26.
+//
+
+/**
+ * Welche's spectral averaging
+ *
+ * {Input block->sliding buffer->Hann window->FFT->accumul S11,S22,S12->divide by K.W }
+ */
+
+#include "welch.h"
+#include "external/kissfft/kiss_fftr.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+#ifndef M_PI2
+#define M_PI2 3.14159265358979323846
+#endif
+
+typedef struct {
+    //FFT infra
+    kiss_fftr_cfg fft_cfg;
+    float *window; //hann window, length N
+    double window_power; // W = Σ w^2 [n]
+
+    //working buffer, sliding
+    float *work_ch1; //lenth N
+    float *work_ch2; //length N
+    int samples_filled; //0..N
+
+    //FFT output buffers, length N/2 + 1
+    kiss_fft_cpx *spectrum_ch1;
+    kiss_fft_cpx *spectrum_ch2;
+
+    //accumulators, running over K segments, length NUM_BINS
+    double *acc_S11;
+    double *acc_S22;
+    double *acc_S12_real;
+    double *acc_S12_imag;
+
+    //averaged results, one-sided spectra, after finalize
+    float *G11;
+    float *G22;
+    float *G12_real;
+    float *G12_imag;
+
+    //state
+    int segments_done;
+    int target_segments;
+    uint64_t samples_fed;
+    MeasureStatus status;
+    int initialized;
+} MeasureContext;
+
+static MeasureContext m_ctx = {0};
+
+
+static void measure_process_segment(void) {
+    //applt precomputed hann window
+    for (int i = 0; i < MEASURE_FFT_SIZE; i++) {
+        m_ctx.work_ch1[i] *= m_ctx.window[i];
+        m_ctx.work_ch2[i] *= m_ctx.window[i];
+    }
+
+    //forward real FFT on both channels
+    kiss_fftr(m_ctx.fft_cfg, m_ctx.work_ch1, m_ctx.spectrum_ch1);
+    kiss_fftr(m_ctx.fft_cfg, m_ctx.work_ch2, m_ctx.spectrum_ch2);
+
+    //accumulate auto and cross-spectra
+    for (int i = 0; i < MEASURE_NUM_BINS; i++) {
+        const double xr = m_ctx.spectrum_ch1[i].r;
+        const double xi = m_ctx.spectrum_ch1[i].i;
+        const double yr = m_ctx.spectrum_ch2[i].r;
+        const double yi = m_ctx.spectrum_ch2[i].i;
+
+        //auto-spectra, |X|^2 , |Y|^2
+        m_ctx.acc_S11[i] += xr * xr + xi * xi;
+        m_ctx.acc_S22[i] += yr * yr + yi * yi;
+
+        /* Cross-spectrum: X* · Y
+         *   X* = xr − j·xi
+         *   X* · Y = (xr·yr + xi·yi) + j·(xr·yi − xi·yr)
+         */
+        m_ctx.acc_S12_real[i] += xr * yr + xi * yi;
+        m_ctx.acc_S12_imag[i] += xr * yi - xi * yr;
+    }
+
+    m_ctx.segments_done++;
+}
+
+static void measure_finalize(void) {
+    if (m_ctx.segments_done == 0) {
+        fprintf(stderr, "measure_finalize: no segments accumulated\n");
+        return;
+    }
+    //welch normalization, by the actual number of segments, not a constant
+    const double norm = 1.0 / ((double)m_ctx.segments_done * m_ctx.window_power);
+
+    for (int i = 0; i < MEASURE_NUM_BINS; i++) {
+        m_ctx.G11[i] = (float)(m_ctx.acc_S11[i] * norm);
+        m_ctx.G22[i] = (float)(m_ctx.acc_S22[i] * norm);
+        m_ctx.G12_real[i] = (float)(m_ctx.acc_S12_real[i] * norm);
+        m_ctx.G12_imag[i] = (float)(m_ctx.acc_S12_imag[i] * norm);
+    }
+
+    //IMPORTANT!! Convert two-sided to one-sided, double bins 1..N/2-1
+    for (int i = 1; i < MEASURE_NUM_BINS - 1; i++) {
+        m_ctx.G11[i] *= 2.0f;
+        m_ctx.G22[i] *= 2.0f;
+        m_ctx.G12_real[i] *= 2.0f;
+        m_ctx.G12_imag[i] *= 2.0f;
+    }
+
+    m_ctx.status = MEASURE_STATUS_COMPLETE;
+}
+
+int measure_init(void) {
+    if (m_ctx.initialized) return 0;
+
+    //FFT config
+    m_ctx.fft_cfg = kiss_fftr_alloc(MEASURE_FFT_SIZE, 0, NULL, NULL);
+
+    if (!m_ctx.fft_cfg) goto fail;
+
+    //Hann window and its power
+    m_ctx.window = (float*)malloc(MEASURE_FFT_SIZE * sizeof(float));
+
+    if (!m_ctx.window) goto fail;
+
+    m_ctx.window_power = 0.0;
+    for (int i = 0; i < MEASURE_FFT_SIZE; i++) {
+        const float w = 0.5f * (1.0f - cosf(2.0f * (float)M_PI2 * i / (MEASURE_FFT_SIZE - 1)));
+        m_ctx.window[i] = w;
+        m_ctx.window_power += (double)w * (double)w;
+    }
+
+    //sliding buffers
+    m_ctx.work_ch1 = (float*)calloc(MEASURE_FFT_SIZE, sizeof(float));
+    m_ctx.work_ch2 = (float*)calloc(MEASURE_FFT_SIZE, sizeof(float));
+
+    if (!m_ctx.work_ch1 || !m_ctx.work_ch2) goto fail;
+
+    //FFT output buffers
+    m_ctx.spectrum_ch1 = (kiss_fft_cpx*)calloc(MEASURE_NUM_BINS, sizeof(kiss_fft_cpx));
+    m_ctx.spectrum_ch2 = (kiss_fft_cpx*)calloc(MEASURE_NUM_BINS, sizeof(kiss_fft_cpx));
+
+    if (!m_ctx.spectrum_ch1 || !m_ctx.spectrum_ch2) goto fail;
+
+    //our accumulators now !!!
+    m_ctx.acc_S11 = (double*)calloc(MEASURE_NUM_BINS, sizeof(double));
+    m_ctx.acc_S22 = (double*)calloc(MEASURE_NUM_BINS, sizeof(double));
+    m_ctx.acc_S12_real = (double*)calloc(MEASURE_NUM_BINS, sizeof(double));
+    m_ctx.acc_S12_imag = (double*)calloc(MEASURE_NUM_BINS, sizeof(double));
+
+    if (!m_ctx.acc_S11 || !m_ctx.acc_S22 || !m_ctx.acc_S12_real || !m_ctx.acc_S12_imag) goto fail;
+
+    //Averaged results
+    m_ctx.G11 = (float*)calloc(MEASURE_NUM_BINS, sizeof(float));
+    m_ctx.G22 = (float*)calloc(MEASURE_NUM_BINS, sizeof(float));
+    m_ctx.G12_real = (float*)calloc(MEASURE_NUM_BINS, sizeof(float));
+    m_ctx.G12_imag = (float*)calloc(MEASURE_NUM_BINS, sizeof(float));
+
+    if (!m_ctx.G11 || !m_ctx.G22 || !m_ctx.G12_real || !m_ctx.G12_imag) goto fail;
+
+    m_ctx.samples_filled = 0;
+    m_ctx.segments_done = 0;
+    m_ctx.samples_fed = 0;
+    m_ctx.target_segments = MEASURE_NUM_SEGMENTS; //default
+    m_ctx.status = MEASURE_STATUS_IDLE;
+    m_ctx.initialized = 1;
+
+    printf("measure: initialized (FFT=%d, shift=%d, default target=%d, segments=%d, hard cap=%d)\n", MEASURE_FFT_SIZE, MEASURE_SHIFT, MEASURE_NUM_SEGMENTS, MEASURE_SEGMENTS_HARD_CAP);
+    return 0;
+
+
+    fail:
+    fprintf(stderr, "measure_init: failed to allocate memory\n");
+    measure_free();
+    return -1;
+}
+
+void measure_free(void) {
+    if (m_ctx.fft_cfg) {
+        kiss_fftr_free(m_ctx.fft_cfg);
+    }
+    free(m_ctx.window);
+    free(m_ctx.work_ch1);
+    free(m_ctx.work_ch2);
+    free(m_ctx.spectrum_ch1);
+    free(m_ctx.spectrum_ch2);
+    free(m_ctx.acc_S11);
+    free(m_ctx.acc_S22);
+    free(m_ctx.acc_S12_real);
+    free(m_ctx.acc_S12_imag);
+    free(m_ctx.G11);
+    free(m_ctx.G22);
+    free(m_ctx.G12_real);
+    free(m_ctx.G12_imag);
+
+    memset(&m_ctx, 0, sizeof(m_ctx));
+}
+
+void measure_reset(void) {
+    if (!m_ctx.initialized) {
+        return;
+    }
+
+    memset(m_ctx.work_ch1, 0, MEASURE_FFT_SIZE * sizeof(float));
+    memset(m_ctx.work_ch2, 0, MEASURE_FFT_SIZE * sizeof(float));
+
+    memset(m_ctx.acc_S11,      0, MEASURE_NUM_BINS * sizeof(double));
+    memset(m_ctx.acc_S22,      0, MEASURE_NUM_BINS * sizeof(double));
+    memset(m_ctx.acc_S12_real, 0, MEASURE_NUM_BINS * sizeof(double));
+    memset(m_ctx.acc_S12_imag, 0, MEASURE_NUM_BINS * sizeof(double));
+
+    memset(m_ctx.G11,      0, MEASURE_NUM_BINS * sizeof(float));
+    memset(m_ctx.G22,      0, MEASURE_NUM_BINS * sizeof(float));
+    memset(m_ctx.G12_real, 0, MEASURE_NUM_BINS * sizeof(float));
+    memset(m_ctx.G12_imag, 0, MEASURE_NUM_BINS * sizeof(float));
+
+    m_ctx.samples_filled = 0;
+    m_ctx.segments_done = 0;
+    m_ctx.samples_fed = 0;
+    m_ctx.status = MEASURE_STATUS_IDLE;
+    //NOTE: target_segments is intentionally preserved (config)
+
+    printf("measure: reset\n");
+}
+
+void measure_set_target_segments(int k) {
+    if (!m_ctx.initialized) return;
+
+    if (k < 0) k = 0;
+    if (k > MEASURE_SEGMENTS_HARD_CAP) k = MEASURE_SEGMENTS_HARD_CAP;
+
+    m_ctx.target_segments = k;
+}
+
+int measure_get_target_segments(void) {
+    return m_ctx.target_segments;
+}
+int measure_get_segments_done(void) {
+    return m_ctx.segments_done;
+}
+uint64_t measure_get_samples_fed(void) {
+    return m_ctx.samples_fed;
+}
+
+int measure_feed_block(const float *ch1, const float *ch2, const int num_samples) {
+    if (!m_ctx.initialized || !ch1 || !ch2 || num_samples <= 0) {
+        return -1;
+    }
+    if (m_ctx.status == MEASURE_STATUS_COMPLETE) {
+        return 1;
+    }
+
+    if (m_ctx.status == MEASURE_STATUS_IDLE) {
+        m_ctx.status = MEASURE_STATUS_ACCUMULATING;
+    }
+
+    int pos = 0;
+
+    while (pos < num_samples) {
+        const int space = MEASURE_FFT_SIZE - m_ctx.samples_filled;
+        const int to_copy = (num_samples - pos < space) ? (num_samples - pos) : space;
+
+        memcpy(m_ctx.work_ch1 + m_ctx.samples_filled, ch1 + pos, to_copy * sizeof(float));
+        memcpy(m_ctx.work_ch2 + m_ctx.samples_filled, ch2 + pos, to_copy * sizeof(float));
+
+        m_ctx.samples_filled += to_copy;
+        m_ctx.samples_fed += (uint64_t)to_copy;
+        pos += to_copy;
+
+        if (m_ctx.samples_filled == MEASURE_FFT_SIZE) {
+            measure_process_segment();
+
+            //Finalize based on dynamic target
+            if (m_ctx.target_segments > 0 && m_ctx.segments_done >= m_ctx.target_segments) {
+                measure_finalize();
+                return 1; //complete, hopefully (~_~)
+            }
+
+            //slider buffer to keep trailing (N - shift) samples
+            const int kept = MEASURE_FFT_SIZE - MEASURE_SHIFT;
+
+            memmove(m_ctx.work_ch1, m_ctx.work_ch2 + MEASURE_SHIFT, kept * sizeof(float));
+            memmove(m_ctx.work_ch2, m_ctx.work_ch2 + MEASURE_SHIFT, kept * sizeof(float));
+
+            m_ctx.samples_filled = kept;
+        }
+    }
+
+    return 0;
+}
+
+int measure_finish_now(void) {
+    if (!m_ctx.initialized) return -1;
+    if (m_ctx.status == MEASURE_STATUS_COMPLETE) return 0;
+    if (m_ctx.segments_done == 0) {
+        fprintf(stderr, "measure_finish_now: no segments to finalize\n");
+        return -1;
+    }
+    measure_finalize();
+    return 0;
+}
+
+MeasureStatus measure_get_status(void) {
+    return m_ctx.status;
+}
+
+int measure_get_progress(void) {
+    if (m_ctx.status == MEASURE_STATUS_COMPLETE) {
+        return 100;
+    }
+    if (m_ctx.target_segments <= 0) return 0;
+
+    const int p = (m_ctx.segments_done * 100) / m_ctx.target_segments;
+
+    return p > 100 ? 100 : p;
+}
+
+int measure_get_num_bins(void) {
+    return MEASURE_NUM_BINS;
+}
+
+const float *measure_get_G11(void) { return m_ctx.G11; }
+const float *measure_get_G22(void) { return m_ctx.G22; }
+const float *measure_get_G12_real(void) { return m_ctx.G12_real; }
+const float *measure_get_G12_imag(void) { return m_ctx.G12_imag; }
+
+float measure_bin_to_hz(const int bin, const float sample_rate) {
+    return (float)bin * sample_rate / (float)MEASURE_FFT_SIZE;
+}
+
+/* -------------------------------------------------------------------
+ * Self Test
+ * ------------------------------------------------------------------*/
+void measure_selftest(void) {
+    printf("\n====== measure_selftest ======\n");
+
+    if (measure_init() != 0) {
+        printf("[selftest] FAILED: init\n");
+        return;
+    }
+
+    const int fs = 44100;
+    const float freq = 440.0f;
+    const int total_n = MEASURE_FFT_SIZE + (MEASURE_NUM_SEGMENTS - 1) * MEASURE_SHIFT;
+
+    float *ch1 = malloc(total_n * sizeof(float));
+    float *ch2 = malloc(total_n * sizeof(float));
+
+    if (!ch1 || !ch2) {
+        printf("[selftest] FAILED: malloc\n");
+        free(ch1);
+        free(ch2);
+        measure_free();
+        return;
+    }
+
+    //two identical 440Hz sine waves
+     for (int i = 0; i < total_n; i++) {
+         const float s = sinf(2.0f * (float)M_PI2 * freq * i / fs);
+         ch1[i] = s;
+         ch2[i] = s;
+     }
+
+    //feed in 512 sample blocks
+    int pos = 0;
+    while (pos < total_n) {
+        int block = 512;
+        if (pos + block > total_n) {
+            block = total_n - pos;
+        }
+        if (measure_feed_block(ch1 + pos, ch2 + pos, block) == 1) {
+            break;
+        }
+        pos += block;
+    }
+
+    if (measure_get_status() != MEASURE_STATUS_COMPLETE) {
+        printf("[selftest] FAILED: not complete\n");
+        free(ch1);
+        free(ch2);
+        measure_free();
+        return;
+    }
+
+    //Check the 440 Hz bin
+    const int bin = (int)roundf(freq * MEASURE_FFT_SIZE / fs);
+
+    const float *G11   = measure_get_G11();
+    const float *G22   = measure_get_G22();
+    const float *G12r  = measure_get_G12_real();
+    const float *G12i  = measure_get_G12_imag();
+
+    const double g11 = G11[bin];
+    const double g22 = G22[bin];
+    const double g12r = G12r[bin];
+    const double g12i = G12i[bin];
+    const double coh = (g12r*g12r + g12i*g12i) / (g11 * g22 + 1e-20);
+
+    const double phase_deg = atan2(g12i, g12r) * 180.0 / M_PI;
+
+    printf("[selftest] bin %d (%.1f Hz), K=%d/%d, samples_fed=%llu\n",
+          bin, measure_bin_to_hz(bin, fs),
+          m_ctx.segments_done, m_ctx.target_segments,
+          (unsigned long long)m_ctx.samples_fed);
+    printf("  Coherence = %.6f  Phase = %.4f°\n", coh, phase_deg);
+    printf("[selftest] %s\n", (coh > 0.99) ? "PASSED" : "FAILED");
+
+    free(ch1);
+    free(ch2);
+    measure_free();
+}
+
+
+
+
+
+
+
+
+
