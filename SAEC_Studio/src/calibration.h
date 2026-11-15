@@ -167,6 +167,6 @@ const float *calibration_get_corr_imag(void);
 //speed of sound approximation with: c = 331.3 + 0.606·T(°C) m/s
 double calibration_speed_of_sound(double temp_c);
 
-double calibration_selftest(void);
+void calibration_selftest(void);
 
 #endif //SAEC_STUDIO_CALIBRATION_H
