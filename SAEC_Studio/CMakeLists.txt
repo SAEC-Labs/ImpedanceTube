@@ -28,6 +28,7 @@ add_custom_command(
         ${GRESOURCE_XML}
         DEPENDS ${GRESOURCE_XML}
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/main_window.ui
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/calibration_dialog.ui
         VERBATIM
 )
 

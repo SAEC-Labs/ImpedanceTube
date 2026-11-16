@@ -36,6 +36,12 @@
                                 <property name="hexpand">False</property>
                             </object>
                         </child>
+                        <child>
+                            <object class="GtkButton" id="calibrate_button">
+                                <property name="label">Calibrate</property>
+                                <property name="hexpand">False</property>
+                            </object>
+                        </child>
 
                         <!-- Device group: label + dropdown tightly bound -->
                         <child>

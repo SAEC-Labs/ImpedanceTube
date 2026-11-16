@@ -2,6 +2,7 @@
 <gresources>
     <gresource prefix="/com/saecstudio/ui">
         <file compressed="true">main_window.ui</file>
+        <file compressed="true">calibration_dialog.ui</file>
     </gresource>
 </gresources>
 

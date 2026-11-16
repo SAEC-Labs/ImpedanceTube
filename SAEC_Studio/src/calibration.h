@@ -89,8 +89,8 @@ void calibration_clear(void);
 
 //Tube params
 
-void calibration_set_tube_params(const TubeParams *params);
-const TubeParams* calibration_get_tube_params(void);
+void calibration_set_tube_parameters(const TubeParams *params);
+const TubeParams* calibration_get_tube_parameters(void);
 
 /* ---------------------------------------------------------------------------
  * computation
@@ -168,5 +168,7 @@ const float *calibration_get_corr_imag(void);
 double calibration_speed_of_sound(double temp_c);
 
 void calibration_selftest(void);
+
+
 
 #endif //SAEC_STUDIO_CALIBRATION_H
