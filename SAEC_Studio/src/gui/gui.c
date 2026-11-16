@@ -8,6 +8,7 @@
 #include "gui.h"
 #include "config.h"
 #include "dsp/dsp.h"
+#include "calibration.h"
 #include "audio.h"
 #include <gtk/gtk.h>
 #include <cairo.h>
@@ -52,6 +53,24 @@ typedef struct {
     GtkBuilder *builder;
     RingBuffer *rb;
 
+    //Calibration widgets
+    GtkWidget *calibrate_button;
+    GtkWidget *calib_dialog;
+    GtkWidget *calib_spin_mic_spacing;
+    GtkWidget *calib_spin_x1;
+    GtkWidget *calib_spin_x2;
+    GtkWidget *calib_spin_temp;
+    GtkWidget *calib_spin_speed;
+    GtkWidget *calib_progress;
+    GtkWidget *calib_status;
+    GtkWidget *calib_diag;
+    GtkWidget *calib_start_button;
+    GtkWidget *calib_save_button;
+    GtkWidget *calib_discard_button;
+    GtkWidget *calib_close_button;
+
+    int calibration_mode;  //1 while a calibration measurement is active
+
     //buffers
     float *interleaved_buffer;
     float *deinterleaved_ch1;
@@ -80,7 +99,19 @@ typedef struct {
     SignalParams signal_params;
 } GUIState;
 
+/* --------------------------------------------------------------------------------
+ * Forward declarations — calibration dialog handlers
+ * (defined later in this file, referenced by setup_callbacks / update_plots)
+ *----------------------------------------------------------------------------------*/
 
+static void on_calibrate_clicked(GtkButton *button, gpointer user_data);
+static void on_calibration_temp_changed(GtkSpinButton *spin, gpointer user_data);
+static void on_calibration_start_clicked(GtkButton *button, gpointer user_data);
+static void on_calibration_save_clicked(GtkButton *button, gpointer user_data);
+static void on_calibration_save_finished(GObject *source, GAsyncResult *result, gpointer user_data);
+static void on_calibration_discard_clicked(GtkButton *button, gpointer user_data);
+static void on_calibration_close_clicked(GtkButton *button, gpointer user_data);
+static void update_calibration_diag_label(GUIState *state); //don't remove this here
 
 /*-------------------------------------------------
  * channel mode heplers
@@ -648,8 +679,7 @@ static void on_draw_coherence(GtkDrawingArea *area, cairo_t *cr, const int width
     draw_coherence_common(cr, width, height, analysis_get_coherence(), state->measure_num_bins, state->measurement_complete);
 }
 
-static gboolean update_plots(gpointer user_data)
-{
+static gboolean update_plots(gpointer user_data) {
     GUIState *state = user_data;
 
     if (!state->is_streaming) return G_SOURCE_CONTINUE;
@@ -657,7 +687,7 @@ static gboolean update_plots(gpointer user_data)
     int in_ch = audio_get_input_channels();
     if (in_ch < 1) in_ch = 1;
 
-    //Read a large block – drains the ring buffer
+    //Read a large block - drains the ring buffer
     const int samples_wanted = GUI_MAX_READ_FRAMES * in_ch;
     const int samples_read = ring_buffer_read(state->rb, state->interleaved_buffer, samples_wanted);
     if (samples_read <= 0) return G_SOURCE_CONTINUE;
@@ -667,9 +697,7 @@ static gboolean update_plots(gpointer user_data)
     //Deinterleave ALL frames
     for (int i = 0; i < frames_read; i++) {
         state->deinterleaved_ch1[i] = state->interleaved_buffer[i * in_ch + 0];
-        state->deinterleaved_ch2[i] = (in_ch >= 2)
-            ? state->interleaved_buffer[i * in_ch + 1]
-            : 0.0f;
+        state->deinterleaved_ch2[i] = (in_ch >= 2) ? state->interleaved_buffer[i * in_ch + 1] : 0.0f;
     }
 
     //Live display, keep only the most recent FFT_SIZE frames
@@ -723,21 +751,54 @@ static gboolean update_plots(gpointer user_data)
     if (state->measurement_active) {
         const int r = measure_feed_block(state->deinterleaved_ch1, state->deinterleaved_ch2, frames_read);
         if (r == 1) {
-            analysis_compute(measure_get_G11(),
-                             measure_get_G22(),
-                             measure_get_G12_real(),
-                             measure_get_G12_imag());
+            if (state->calibration_mode) {
+                //Calibration completion path
+                const int rc = calibration_compute_from_rigid(
+                    measure_get_G11(),
+                    measure_get_G22(),
+                    measure_get_G12_real(),
+                    measure_get_G12_imag()
+                    );
+
+                if (rc == 0) {
+                    update_calibration_diag_label(state);
+
+                    gtk_label_set_text(GTK_LABEL(state->calib_status), "Calibration computed successfully.");
+                    gtk_label_set_text(GTK_LABEL(state->status_label), "Calibration complete - save to disk to persist.");
+                } else {
+                    gtk_label_set_text(GTK_LABEL(state->calib_status), "Calibration FAILED - see terminal for details.");
+                    gtk_label_set_text(GTK_LABEL(state->calib_diag), "Not enough valid bins.\n"
+                                       "Check: excitation covered full band?\n"
+                                       "Both mics connected and sealed?\n"
+                                       "Rigid cap properly installed?");
+                    gtk_widget_set_sensitive(state->calib_save_button, FALSE);
+                }
+
+                state->calibration_mode = 0;
+                gtk_widget_set_sensitive(state->calib_start_button, TRUE);
+                gtk_widget_set_sensitive(state->measure_button, TRUE);
+                gtk_widget_set_sensitive(state->calibrate_button, TRUE);
+                gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(state->calib_progress), 1.0);
+
+            } else {
+                //Regular measurement path
+                analysis_compute(measure_get_G11(),
+                                 measure_get_G22(),
+                                 measure_get_G12_real(),
+                                 measure_get_G12_imag());
+
+                gtk_widget_queue_draw(state->h12_area);
+                gtk_widget_queue_draw(state->coherence_area);
+
+                char status[512];
+                snprintf(status, sizeof(status),
+                         "Measurement complete (%d segments, %.1f s)  |  Click 'Measure' to re-acquire",
+                         measure_get_segments_done(), state->target_duration_s);
+                gtk_label_set_text(GTK_LABEL(state->status_label), status);
+            }
+
             state->measurement_active   = 0;
             state->measurement_complete = 1;
-
-            gtk_widget_queue_draw(state->h12_area);
-            gtk_widget_queue_draw(state->coherence_area);
-
-            char status[512];
-            snprintf(status, sizeof(status),
-                     "Measurement complete (%d segments, %.1f s)  |  Click 'Measure' to re-acquire",
-                     measure_get_segments_done(), state->target_duration_s);
-            gtk_label_set_text(GTK_LABEL(state->status_label), status);
 
         } else if (r < 0) {
             state->measurement_active = 0;
@@ -751,12 +812,23 @@ static gboolean update_plots(gpointer user_data)
 
             if (pct > 100.0f) pct = 100.0f;
 
+            if (state->calibration_mode && state->calib_progress) {
+                gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(state->calib_progress),
+                                              pct / 100.0f);
+                char calib_status[128];
+                snprintf(calib_status, sizeof(calib_status),
+                         "Acquiring… %.1f / %.1f s (%.0f%%)",
+                         elapsed_s, state->target_duration_s, pct);
+                gtk_label_set_text(GTK_LABEL(state->calib_status), calib_status);
+            }
+
             char status[512];
             snprintf(status, sizeof(status),
-                     "Measuring… %.1f / %.1f s (%.0f%%)  |  K=%d/%d",
-                     elapsed_s, state->target_duration_s, pct,
+                     "%s… %.1f / %.1f s (%.0f%%)  |  K=%d/%d", state->calibration_mode ? "Calibrating" : "Measuring", elapsed_s, state->target_duration_s, pct,
                      measure_get_segments_done(),
-                     measure_get_target_segments());
+                     measure_get_target_segments()
+                     );
+
             gtk_label_set_text(GTK_LABEL(state->status_label), status);
         }
     }
@@ -773,6 +845,8 @@ static gboolean update_plots(gpointer user_data)
 static void on_measure_clicked(const GtkButton *button, gpointer user_data) {
     (void)button;
     GUIState *state = user_data;
+
+    state->calibration_mode = 0;
 
     if (!state->is_streaming) {
         gtk_label_set_text(GTK_LABEL(state->status_label), "Start the stream before measuring.");
@@ -850,6 +924,208 @@ static void on_measure_clicked(const GtkButton *button, gpointer user_data) {
     gtk_label_set_text(GTK_LABEL(state->status_label), status);
 }
 
+static void update_calibration_diag_label(GUIState *state) {
+    if (!calibration_is_loaded()) {
+        gtk_label_set_text(GTK_LABEL(state->calib_diag), "No calibration computed yet.");
+        gtk_widget_set_sensitive(state->calib_save_button, FALSE);
+        return;
+    }
+
+    const CalibrationDiagnostics *dg = calibration_get_diagnostics();
+    char diag[512];
+    snprintf(diag, sizeof(diag),
+             "Valid bins:       %d / %d\n"
+             "Valid band:       %.0f Hz – %.0f Hz\n"
+             "Max amplitude dev: %.2f dB\n"
+             "Max phase dev:     %.2f°\n"
+             "Mean coherence:    %.3f\n"
+             "Timestamp:         %s",
+             dg->num_valid_bins, measure_get_num_bins(),
+             dg->min_freq_hz, dg->max_freq_hz,
+             dg->max_amplitude_dev_db,
+             dg->max_phase_dev_deg,
+             dg->mean_coherence,
+             dg->timestamp);
+
+    gtk_label_set_text(GTK_LABEL(state->calib_diag), diag);
+    gtk_widget_set_sensitive(state->calib_save_button, TRUE);
+}
+
+static void on_calibrate_clicked(GtkButton *button, gpointer user_data) {
+    (void) button;
+    GUIState *state = user_data;
+
+    if (state->measurement_active) {
+        gtk_label_set_text(GTK_LABEL(state->status_label), "Cannot calibrate while measurement is running.");
+        return;
+    }
+
+    //populate spin buttons for current params
+    const TubeParams *tp = calibration_get_tube_parameters();
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(state->calib_spin_mic_spacing), tp->mic_spacing_m);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(state->calib_spin_x1), tp->x1_to_cap_m);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(state->calib_spin_x2), tp->x2_to_cap_m);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(state->calib_spin_temp), 20.0);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(state->calib_spin_speed), tp->speed_of_sound_mps);
+
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(state->calib_progress), 0.0);
+    gtk_label_set_text(GTK_LABEL(state->calib_status), "Not started");
+    gtk_widget_set_sensitive(state->calib_start_button, TRUE);
+
+    update_calibration_diag_label(state);
+
+    gtk_window_present(GTK_WINDOW(state->calib_dialog));
+}
+
+static void on_calibration_temp_changed(GtkSpinButton *spin, gpointer user_data) {
+    const GUIState *state = user_data;
+    const double temp = gtk_spin_button_get_value(spin);
+    const double speed = calibration_speed_of_sound(temp);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(state->calib_spin_speed), speed);
+}
+
+
+static void on_calibration_start_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;
+    GUIState *state = user_data;
+
+    if (state->measurement_active) {
+        gtk_label_set_text(GTK_LABEL(state->calib_status), "A measurement is already running.");
+        return;
+    }
+
+    //Read geometry from spin buttons
+    TubeParams tp;
+    tp.mic_spacing_m = gtk_spin_button_get_value(GTK_SPIN_BUTTON(state->calib_spin_mic_spacing));
+    tp.x1_to_cap_m = gtk_spin_button_get_value(GTK_SPIN_BUTTON(state->calib_spin_x1));
+    tp.x2_to_cap_m = gtk_spin_button_get_value(GTK_SPIN_BUTTON(state->calib_spin_x2));
+    tp.speed_of_sound_mps = gtk_spin_button_get_value(GTK_SPIN_BUTTON(state->calib_spin_speed));
+    tp.sample_rate = SAMPLE_RATE;
+    tp.fft_size = MEASURE_FFT_SIZE;
+    tp.num_bins = measure_get_num_bins();
+
+    calibration_set_tube_parameters(&tp);
+
+    //Force a log sweep for calibration (Overrides current signal choice)
+    const float calib_duration = 10.0f;
+    state->signal_params.type = SIGNAL_LOG_SWEEP;
+    state->signal_params.frequency = 100.0f;
+    state->signal_params.frequency_end = 2000.0f;
+    state->signal_params.sweep_duration = calib_duration;
+    state->signal_params.amplitude = 0.5f;
+    state->signal_params.is_active = 1;
+    state->signal_params.sample_rate = SAMPLE_RATE;
+
+    audio_update_signal_params(&state->signal_params);
+
+    //auto start stream if not running
+    if (!state->is_streaming) {
+        if (audio_start() != 0) {
+            gtk_label_set_text(GTK_LABEL(state->calib_status), "Failed to start audio stream.");
+            return;
+        }
+        state->is_streaming = 1;
+        gtk_button_set_label(GTK_BUTTON(state->start_stop_button), "Stop");
+    }
+
+    //measurement config
+    const uint64_t target_samples = (uint64_t)(calib_duration * (float)SAMPLE_RATE);
+    int target_segments;
+
+    if (target_samples <= MEASURE_FFT_SIZE) {
+        target_segments = 1;
+    } else {
+        target_segments = 1 + (int)((target_samples - MEASURE_FFT_SIZE) / MEASURE_SHIFT);
+    }
+
+    if (target_segments < 4) {
+        target_segments = 4;
+    }
+    if (target_segments > MEASURE_SEGMENTS_HARD_CAP) {
+        target_segments = MEASURE_SEGMENTS_HARD_CAP;
+    }
+
+    calibration_clear();
+    measure_reset();
+    measure_set_target_segments(target_segments);
+
+    state->measurement_active = 1;
+    state->measurement_complete = 0;
+    state->calibration_mode = 1;
+    state->target_segments = (uint64_t)target_segments;
+    state->target_duration_s = calib_duration;
+
+    //UI feedback
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(state->calib_progress), 0.0);
+
+    gtk_label_set_text(GTK_LABEL(state->calib_status), "Acquiring…");
+    gtk_widget_set_sensitive(state->calib_start_button, FALSE);
+    gtk_widget_set_sensitive(state->calib_save_button, FALSE);
+    gtk_widget_set_sensitive(state->measure_button, FALSE);
+    gtk_widget_set_sensitive(state->calibrate_button, FALSE);
+
+    gtk_label_set_text(GTK_LABEL(state->status_label), "Calibration measuring… 10.0 s log sweep");
+}
+
+static void on_calibration_save_finished(GObject *source, GAsyncResult *result, gpointer user_data) {
+    GUIState *state = user_data;
+    GtkFileDialog *dialog = GTK_FILE_DIALOG(source);
+    GError *error = NULL;
+
+    GFile *file = gtk_file_dialog_save_finish(dialog, result, &error);
+    if (!file) {
+        if (error) g_error_free(error);
+            return;
+    }
+
+    char *path = g_file_get_path(file);
+    if (path) {
+        if (calibration_save(path) == 0) {
+            char msg[512];
+            snprintf(msg, sizeof(msg), "Calibration saved to %s", path);
+            gtk_label_set_text(GTK_LABEL(state->calib_status), msg);
+        } else {
+            gtk_label_set_text(GTK_LABEL(state->calib_status), "Error saving calibration file.");
+        }
+        g_free(path);
+    }
+    g_object_unref(file); // (~_~)
+}
+
+static void on_calibration_save_clicked(GtkButton *button, gpointer user_data) {
+    (void) button;
+    GUIState *state = user_data;
+
+    GtkFileDialog *dialog = gtk_file_dialog_new();
+    gtk_file_dialog_set_title(dialog, "Save Calibration");
+    gtk_file_dialog_set_initial_name(dialog, "calibration.txt");
+
+    gtk_file_dialog_save(dialog, GTK_WINDOW(state->calib_dialog), NULL, on_calibration_save_finished, state);
+
+    g_object_unref(dialog);
+}
+
+static void on_calibration_discard_clicked(GtkButton *button, gpointer user_data) {
+    (void) button;
+    GUIState *state = user_data;
+
+    calibration_clear();
+
+    gtk_label_set_text(GTK_LABEL(state->calib_status), "Calibration discarded");
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(state->calib_progress), 0.0);
+
+    update_calibration_diag_label(state);
+
+    gtk_label_set_text(GTK_LABEL(state->status_label), "Calibration discarded from memory");
+}
+
+static void on_calibration_close_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;
+    const GUIState *state = user_data;
+    gtk_widget_set_visible(state->calib_dialog, FALSE);
+}
+
+
 //start/stop button
 static void on_start_stop_toggled(GtkToggleButton *button, gpointer user_data)
 {
@@ -924,8 +1200,22 @@ static void setup_callbacks(GUIState *state) {
 
     //window
     g_signal_connect(state->window, "close-request", G_CALLBACK(on_window_closed), state);
-}
 
+    //calibration button
+    if (state->calibrate_button) {
+        g_signal_connect(state->calibrate_button, "clicked", G_CALLBACK(on_calibrate_clicked), state);
+    }
+
+    //calibration dialog signals
+    if (state->calib_dialog) {
+        g_signal_connect(state->calib_start_button, "clicked", G_CALLBACK(on_calibration_start_clicked), state);
+        g_signal_connect(state->calib_save_button, "clicked", G_CALLBACK(on_calibration_save_clicked), state);
+        g_signal_connect(state->calib_discard_button, "clicked", G_CALLBACK(on_calibration_discard_clicked), state);
+        g_signal_connect(state->calib_close_button, "clicked", G_CALLBACK(on_calibration_close_clicked), state);
+        g_signal_connect(state->calib_spin_temp, "value-changed", G_CALLBACK(on_calibration_temp_changed), state);
+    }
+
+}
 
 //activation callback
 static void app_activate(GtkApplication *app, const gpointer user_data)
@@ -938,7 +1228,18 @@ static void app_activate(GtkApplication *app, const gpointer user_data)
     GtkBuilder *builder = gtk_builder_new_from_resource("/com/saecstudio/ui/main_window.ui");
 
     if (builder == NULL) {
-        g_printerr("ERROR: Failed to load UI file.\n");
+        g_printerr("ERROR: Failed to main_window.ui\n");
+        return;
+    }
+
+    //Append calibration dialog to the same builder
+    GError *error = NULL;
+    if (!gtk_builder_add_from_resource(builder, "/com/saecstudio/ui/calibration_dialog.ui", &error)) {
+        g_printerr("ERROR: Failed to load calibration_dialog.ui: %s\n", error ? error->message : "unknown error");
+        if (error) {
+            g_error_free(error);
+        }
+        g_object_unref(builder);
         return;
     }
 
@@ -969,13 +1270,31 @@ static void app_activate(GtkApplication *app, const gpointer user_data)
     state->cancel_button = GTK_WIDGET(gtk_builder_get_object(builder, "dialog_cancel_button"));
     GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(builder, "signal_params_dialog"));
 
-    if (!state->window || !state->waveform_area_ch1 || !state->waveform_area_ch2 ||
-        !state->spectrum_area_ch1 || !state->spectrum_area_ch2 ||
-        !state->h12_area || !state->coherence_area ||
-        !state->waveform_col2 || !state->spectrum_col2 ||
-        !state->device_combo || !state->signal_type_combo ||
-        !state->start_stop_button || !state->measure_button || !state->status_label ||
-        !state->generate_button || !state->cancel_button || !dialog) {
+    //Calibrate button in control bar
+    state->calibrate_button = GTK_WIDGET(gtk_builder_get_object(builder, "calibrate_button"));
+
+    //Calibration dialog widgets
+    state->calib_dialog = GTK_WIDGET(gtk_builder_get_object(builder, "calibration_dialog"));
+    state->calib_spin_mic_spacing = GTK_WIDGET(gtk_builder_get_object(builder, "calib_spin_mic_spacing"));
+    state->calib_spin_x1 = GTK_WIDGET(gtk_builder_get_object(builder, "calib_spin_x1"));
+    state->calib_spin_x2 = GTK_WIDGET(gtk_builder_get_object(builder, "calib_spin_x2"));
+    state->calib_spin_temp = GTK_WIDGET(gtk_builder_get_object(builder, "calib_spin_temp"));
+    state->calib_spin_speed = GTK_WIDGET(gtk_builder_get_object(builder, "calib_spin_speed"));
+    state->calib_progress = GTK_WIDGET(gtk_builder_get_object(builder, "calib_progress"));
+    state->calib_status = GTK_WIDGET(gtk_builder_get_object(builder, "calib_status"));
+    state->calib_diag = GTK_WIDGET(gtk_builder_get_object(builder, "calib_diag"));
+    state->calib_start_button = GTK_WIDGET(gtk_builder_get_object(builder, "calib_start_button"));
+    state->calib_save_button = GTK_WIDGET(gtk_builder_get_object(builder, "calib_save_button"));
+    state->calib_discard_button = GTK_WIDGET(gtk_builder_get_object(builder, "calib_discard_button"));
+    state->calib_close_button = GTK_WIDGET(gtk_builder_get_object(builder, "calib_close_button"));
+
+    if (!state->window || !state->waveform_area_ch1 || !state->waveform_area_ch2 || !state->spectrum_area_ch1 || !state->spectrum_area_ch2 ||
+        !state->h12_area || !state->coherence_area || !state->waveform_col2 || !state->spectrum_col2 || !state->device_combo || !state->signal_type_combo ||
+        !state->start_stop_button || !state->measure_button || !state->status_label || !state->generate_button || !state->cancel_button || !dialog ||
+        !state->calibrate_button || !state->calib_dialog || !state->calib_spin_mic_spacing || !state->calib_spin_x1 || !state->calib_spin_x2 ||
+        !state->calib_spin_temp || !state->calib_spin_speed || !state->calib_progress || !state->calib_status || !state->calib_diag ||
+        !state->calib_start_button || !state->calib_save_button || !state->calib_discard_button || !state->calib_close_button) {
+
         fprintf(stderr, "app_activate: Failed to get all widgets.\n");
         g_object_unref(builder);
         return;
@@ -991,7 +1310,11 @@ static void app_activate(GtkApplication *app, const gpointer user_data)
     g_signal_connect(dialog, "close-request", G_CALLBACK(on_dialog_closed), state);
     g_signal_connect(state->generate_button, "clicked", G_CALLBACK(on_dialog_generate), state);
     g_signal_connect(state->cancel_button, "clicked", G_CALLBACK(on_dialog_cancel), state);
+
     gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(state->window));
+
+    gtk_window_set_transient_for(GTK_WINDOW(state->calib_dialog), GTK_WINDOW(state->window));
+    gtk_window_set_modal(GTK_WINDOW(state->calib_dialog), TRUE);
 
     //Populate combos
     populate_device_combo(state);
@@ -999,6 +1322,16 @@ static void app_activate(GtkApplication *app, const gpointer user_data)
 
     //Setup drawing + button callbacks
     setup_callbacks(state);
+
+    state->calibration_mode = 0;
+    update_calibration_diag_label(state);
+
+    //Try to load a saved calibration from the working directory
+    if (calibration_load("calibration.txt") == 0) {
+        printf("calibration: loaded default file 'calibration.txt'\n");
+
+        update_calibration_diag_label(state);
+    }
 
     //Initialize signal parameters
     state->signal_params.type = SIGNAL_SINE;
@@ -1051,6 +1384,12 @@ int gui_run(const int argc, char **argv, RingBuffer *rb)
         measure_free();
         return -1;
     }
+    if (calibration_init(measure_get_num_bins()) != 0) {
+        fprintf(stderr, "gui_run: calibration_init failed\n");
+        analysis_free();
+        measure_free();
+        return -1;
+    }
 
     GUIState *state = calloc(1, sizeof(GUIState));
     if (state == NULL) {
@@ -1093,6 +1432,7 @@ int gui_run(const int argc, char **argv, RingBuffer *rb)
         free(state);
         measure_free();
         analysis_free();
+        calibration_free();
         return -1;
         }
 
@@ -1131,6 +1471,7 @@ int gui_run(const int argc, char **argv, RingBuffer *rb)
 
     measure_free();
     analysis_free();
+    calibration_free();
 
     return status;
 }

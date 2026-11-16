@@ -28,6 +28,7 @@ add_custom_command(
         ${GRESOURCE_XML}
         DEPENDS ${GRESOURCE_XML}
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/main_window.ui
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/calibration_dialog.ui
         VERBATIM
 )
 
@@ -63,6 +64,8 @@ add_executable(SAEC_Studio main.c
         src/dsp/analyzer.h
         src/gui/plot_axes.c
         src/gui/plot_axes.h
+        src/calibration.c
+        src/calibration.h
 )
 
 # Link the libs

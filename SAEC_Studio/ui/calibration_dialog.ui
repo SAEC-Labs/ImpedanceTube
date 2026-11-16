@@ -1,0 +1,336 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+    <requires lib="gtk" version="4.0"/>
+
+    <object class="GtkWindow" id="calibration_dialog">
+        <property name="title">Tube Calibration – Rigid Termination</property>
+        <property name="modal">True</property>
+        <property name="default-width">440</property>
+        <property name="default-height">480</property>
+        <property name="resizable">True</property>
+        <child>
+            <object class="GtkScrolledWindow" id="calib_scroll">
+                <property name="hscrollbar-policy">never</property>
+                <property name="vscrollbar-policy">automatic</property>
+                <property name="propagate-natural-height">False</property>
+                <child>
+                    <object class="GtkBox" id="calib_vbox">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">6</property>
+                        <property name="margin-start">10</property>
+                        <property name="margin-end">10</property>
+                        <property name="margin-top">8</property>
+                        <property name="margin-bottom">8</property>
+
+                        <!-- Instructions -->
+                        <child>
+                            <object class="GtkLabel" id="calib_instructions">
+                                <property name="label">1. Remove sample, insert rigid cap.  2. Seal both mic ports, close tube end.</property>
+                                <property name="halign">start</property>
+                                <property name="wrap">True</property>
+                                <attributes>
+                                    <attribute name="scale" value="0.9"/>
+                                </attributes>
+                            </object>
+                        </child>
+
+                        <!-- Geometry (vertical stack) -->
+                        <child>
+                            <object class="GtkFrame" id="calib_geom_frame">
+                                <property name="label">Tube Geometry</property>
+                                <child>
+                                    <object class="GtkBox" id="calib_geom_vbox">
+                                        <property name="orientation">vertical</property>
+                                        <property name="spacing">3</property>
+                                        <property name="margin-start">6</property>
+                                        <property name="margin-end">6</property>
+                                        <property name="margin-top">4</property>
+                                        <property name="margin-bottom">4</property>
+
+                                        <!-- Mic spacing -->
+                                        <child>
+                                            <object class="GtkBox" id="calib_row_mic_spacing">
+                                                <property name="orientation">horizontal</property>
+                                                <property name="spacing">6</property>
+                                                <child>
+                                                    <object class="GtkLabel" id="calib_lbl_mic_spacing">
+                                                        <property name="label">Mic spacing s:</property>
+                                                        <property name="halign">start</property>
+                                                        <property name="hexpand">True</property>
+                                                    </object>
+                                                </child>
+                                                <child>
+                                                    <object class="GtkSpinButton" id="calib_spin_mic_spacing">
+                                                        <property name="adjustment">
+                                                            <object class="GtkAdjustment">
+                                                                <property name="lower">0.01</property>
+                                                                <property name="upper">0.5</property>
+                                                                <property name="step-increment">0.005</property>
+                                                                <property name="page-increment">0.01</property>
+                                                                <property name="value">0.05</property>
+                                                            </object>
+                                                        </property>
+                                                        <property name="digits">4</property>
+                                                        <property name="width-chars">7</property>
+                                                    </object>
+                                                </child>
+                                                <child>
+                                                    <object class="GtkLabel" id="calib_unit_mic_spacing">
+                                                        <property name="label">m</property>
+                                                        <property name="width-chars">3</property>
+                                                    </object>
+                                                </child>
+                                            </object>
+                                        </child>
+
+                                        <!-- x1 -->
+                                        <child>
+                                            <object class="GtkBox" id="calib_row_x1">
+                                                <property name="orientation">horizontal</property>
+                                                <property name="spacing">6</property>
+                                                <child>
+                                                    <object class="GtkLabel" id="calib_lbl_x1">
+                                                        <property name="label">x₁ (cap → Mic 1):</property>
+                                                        <property name="halign">start</property>
+                                                        <property name="hexpand">True</property>
+                                                    </object>
+                                                </child>
+                                                <child>
+                                                    <object class="GtkSpinButton" id="calib_spin_x1">
+                                                        <property name="adjustment">
+                                                            <object class="GtkAdjustment">
+                                                                <property name="lower">0.02</property>
+                                                                <property name="upper">1.0</property>
+                                                                <property name="step-increment">0.005</property>
+                                                                <property name="page-increment">0.01</property>
+                                                                <property name="value">0.10</property>
+                                                            </object>
+                                                        </property>
+                                                        <property name="digits">4</property>
+                                                        <property name="width-chars">7</property>
+                                                    </object>
+                                                </child>
+                                                <child>
+                                                    <object class="GtkLabel" id="calib_unit_x1">
+                                                        <property name="label">m</property>
+                                                        <property name="width-chars">3</property>
+                                                    </object>
+                                                </child>
+                                            </object>
+                                        </child>
+
+                                        <!-- x2 -->
+                                        <child>
+                                            <object class="GtkBox" id="calib_row_x2">
+                                                <property name="orientation">horizontal</property>
+                                                <property name="spacing">6</property>
+                                                <child>
+                                                    <object class="GtkLabel" id="calib_lbl_x2">
+                                                        <property name="label">x₂ (cap → Mic 2):</property>
+                                                        <property name="halign">start</property>
+                                                        <property name="hexpand">True</property>
+                                                    </object>
+                                                </child>
+                                                <child>
+                                                    <object class="GtkSpinButton" id="calib_spin_x2">
+                                                        <property name="adjustment">
+                                                            <object class="GtkAdjustment">
+                                                                <property name="lower">0.01</property>
+                                                                <property name="upper">0.99</property>
+                                                                <property name="step-increment">0.005</property>
+                                                                <property name="page-increment">0.01</property>
+                                                                <property name="value">0.05</property>
+                                                            </object>
+                                                        </property>
+                                                        <property name="digits">4</property>
+                                                        <property name="width-chars">7</property>
+                                                    </object>
+                                                </child>
+                                                <child>
+                                                    <object class="GtkLabel" id="calib_unit_x2">
+                                                        <property name="label">m</property>
+                                                        <property name="width-chars">3</property>
+                                                    </object>
+                                                </child>
+                                            </object>
+                                        </child>
+
+                                        <!-- Temperature -->
+                                        <child>
+                                            <object class="GtkBox" id="calib_row_temp">
+                                                <property name="orientation">horizontal</property>
+                                                <property name="spacing">6</property>
+                                                <child>
+                                                    <object class="GtkLabel" id="calib_lbl_temp">
+                                                        <property name="label">Temperature:</property>
+                                                        <property name="halign">start</property>
+                                                        <property name="hexpand">True</property>
+                                                    </object>
+                                                </child>
+                                                <child>
+                                                    <object class="GtkSpinButton" id="calib_spin_temp">
+                                                        <property name="adjustment">
+                                                            <object class="GtkAdjustment">
+                                                                <property name="lower">0</property>
+                                                                <property name="upper">50</property>
+                                                                <property name="step-increment">0.5</property>
+                                                                <property name="page-increment">5</property>
+                                                                <property name="value">20.0</property>
+                                                            </object>
+                                                        </property>
+                                                        <property name="digits">1</property>
+                                                        <property name="width-chars">7</property>
+                                                    </object>
+                                                </child>
+                                                <child>
+                                                    <object class="GtkLabel" id="calib_unit_temp">
+                                                        <property name="label">°C</property>
+                                                        <property name="width-chars">3</property>
+                                                    </object>
+                                                </child>
+                                            </object>
+                                        </child>
+
+                                        <!-- Speed of sound -->
+                                        <child>
+                                            <object class="GtkBox" id="calib_row_speed">
+                                                <property name="orientation">horizontal</property>
+                                                <property name="spacing">6</property>
+                                                <child>
+                                                    <object class="GtkLabel" id="calib_lbl_speed">
+                                                        <property name="label">Speed of sound:</property>
+                                                        <property name="halign">start</property>
+                                                        <property name="hexpand">True</property>
+                                                    </object>
+                                                </child>
+                                                <child>
+                                                    <object class="GtkSpinButton" id="calib_spin_speed">
+                                                        <property name="adjustment">
+                                                            <object class="GtkAdjustment">
+                                                                <property name="lower">300</property>
+                                                                <property name="upper">400</property>
+                                                                <property name="step-increment">0.5</property>
+                                                                <property name="page-increment">5</property>
+                                                                <property name="value">343.0</property>
+                                                            </object>
+                                                        </property>
+                                                        <property name="digits">1</property>
+                                                        <property name="width-chars">7</property>
+                                                    </object>
+                                                </child>
+                                                <child>
+                                                    <object class="GtkLabel" id="calib_unit_speed">
+                                                        <property name="label">m/s</property>
+                                                        <property name="width-chars">3</property>
+                                                    </object>
+                                                </child>
+                                            </object>
+                                        </child>
+
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+
+                        <!-- Acquisition -->
+                        <child>
+                            <object class="GtkFrame" id="calib_acqu_frame">
+                                <property name="label">Acquisition</property>
+                                <child>
+                                    <object class="GtkBox" id="calib_acqu_box">
+                                        <property name="orientation">vertical</property>
+                                        <property name="spacing">4</property>
+                                        <property name="margin-start">6</property>
+                                        <property name="margin-end">6</property>
+                                        <property name="margin-top">4</property>
+                                        <property name="margin-bottom">4</property>
+
+                                        <child>
+                                            <object class="GtkLabel" id="calib_acqu_desc">
+                                                <property name="label">Log sweep, 100 → 2000 Hz, 10 s, amplitude 0.5</property>
+                                                <property name="halign">start</property>
+                                                <property name="wrap">True</property>
+                                                <attributes>
+                                                    <attribute name="scale" value="0.9"/>
+                                                </attributes>
+                                            </object>
+                                        </child>
+
+                                        <child>
+                                            <object class="GtkProgressBar" id="calib_progress">
+                                                <property name="show-text">False</property>
+                                                <property name="fraction">0.0</property>
+                                            </object>
+                                        </child>
+
+                                        <child>
+                                            <object class="GtkLabel" id="calib_status">
+                                                <property name="label">Not started</property>
+                                                <property name="halign">start</property>
+                                                <property name="wrap">True</property>
+                                            </object>
+                                        </child>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+
+                        <!-- Result -->
+                        <child>
+                            <object class="GtkFrame" id="calib_diag_frame">
+                                <property name="label">Result</property>
+                                <child>
+                                    <object class="GtkLabel" id="calib_diag">
+                                        <property name="label">No calibration computed yet.</property>
+                                        <property name="halign">start</property>
+                                        <property name="wrap">True</property>
+                                        <property name="selectable">True</property>
+                                        <property name="margin-start">6</property>
+                                        <property name="margin-end">6</property>
+                                        <property name="margin-top">4</property>
+                                        <property name="margin-bottom">4</property>
+                                        <attributes>
+                                            <attribute name="scale" value="0.9"/>
+                                        </attributes>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+
+                        <!-- Buttons -->
+                        <child>
+                            <object class="GtkBox" id="calib_button_row">
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">6</property>
+                                <property name="halign">end</property>
+                                <property name="margin-top">4</property>
+
+                                <child>
+                                    <object class="GtkButton" id="calib_close_button">
+                                        <property name="label">Close</property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="GtkButton" id="calib_discard_button">
+                                        <property name="label">Discard</property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="GtkButton" id="calib_save_button">
+                                        <property name="label">Save…</property>
+                                        <property name="sensitive">False</property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="GtkButton" id="calib_start_button">
+                                        <property name="label">Start Calibration</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+            </object>
+        </child>
+    </object>
+</interface>
