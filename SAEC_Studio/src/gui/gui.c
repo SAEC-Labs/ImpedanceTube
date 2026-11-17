@@ -428,41 +428,18 @@ static void draw_waveform_common(cairo_t *cr, int width, int height, const float
     cairo_restore(cr);
 }
 
-static void draw_spectrum_common(cairo_t *cr, int width, int height, const float *spectrum, int num_bins, double r, double g, double b, float sample_rate) {
+static void draw_spectrum_common(cairo_t *cr, const int width, const int height, const float *spectrum, int num_bins, double r, double g, double b, float sample_rate) {
     cairo_set_source_rgb(cr, 0.08, 0.08, 0.10);
     cairo_paint(cr);
 
     PlotFrame frame;
-    plot_frame_init(&frame, width, height, 60, 10, 15, 40);
-
-    //Peak (skip DC bin 0)
-    float max_val = 1e-4f;
-    for (int i = 1; i < num_bins; i++)
-        if (spectrum[i] > max_val) {
-            max_val = spectrum[i];
-        }
-
-    //quantize Y max to 1-2-5 decade steps -> stable tick labels
-    const double exponent = floor(log10((double)max_val));
-    const double mantissa = (double)max_val / pow(10.0, exponent);
-    double nice_mantissa; // (~_~)
-
-    if (mantissa <= 1.0) {
-        nice_mantissa = 1.0;
-    } else if (mantissa <= 2.0) {
-        nice_mantissa = 2.0;
-    } else if (mantissa <= 5.0) {
-        nice_mantissa = 5.0;
-    }else {
-        nice_mantissa = 10.0;
-    }
-    const double nice_max = nice_mantissa * pow(10.0, exponent);
+    plot_frame_init(&frame, width, height, 65, 10, 15, 40);
 
     const double nyquist = (double)sample_rate * 0.5;
 
-    //log-frequency axis must have min > 0 to avoid NaN
+    //Fixed y-axis on log scale (1e-6 to 1.0) -> no jitter, covers 6 decades of audio range
     const AxisConfig x_axis = { .label = "Frequency", .unit = "Hz", .min_value = 20.0, .max_value = nyquist, .log_scale = 1, .num_ticks = 0 };
-    const AxisConfig y_axis = { .label = "Magnitude", .unit = "", .min_value = 0.0, .max_value = nice_max, .log_scale = 0, .num_ticks = 5 };
+    const AxisConfig y_axis = { .label = "Magnitude", .unit = "", .min_value = 1e-6, .max_value = 1.0, .log_scale = 1, .num_ticks = 0 };
 
     plot_draw_axes(cr, &frame, &x_axis, &y_axis);
 
@@ -473,26 +450,44 @@ static void draw_spectrum_common(cairo_t *cr, int width, int height, const float
     cairo_set_source_rgb(cr, r, g, b);
     cairo_set_line_width(cr, 1.5);
 
-    int started = 0;
+    //Find first bin whose frequency is >= x_axis.min_value (skip DC bin 0)
+    int first_bin = -1;
     for (int i = 1; i < num_bins; i++) {
         const double hz = (double)i * sample_rate / ((double)num_bins * 2.0);
-
-        if (hz < x_axis.min_value) {
-            continue;
-        }
-        const double px = plot_map_x(&frame, &x_axis, hz);
-        const double py = plot_map_y(&frame, &y_axis, (double)spectrum[i]);
-
-        if (!started) {
-            cairo_move_to(cr, px, py); started = 1;
-        }else {
-            cairo_line_to(cr, px, py);
+        if (hz >= x_axis.min_value) {
+            first_bin = i;
+            break;
         }
     }
+    if (first_bin < 0) {
+        cairo_restore(cr);
+        return;
+    }
+
+    //Seed the trace at the left plot edge (same y as first bin), so it touches the y-axis
+    const double first_y = plot_map_y(&frame, &y_axis, (double)spectrum[first_bin]);
+    cairo_move_to(cr, frame.plot_x, first_y);
+
+    //Draw the actual trace from first_bin to the last bin
+    for (int i = first_bin; i < num_bins; i++) {
+        const double hz = (double)i * sample_rate / ((double)num_bins * 2.0);
+        const double px = plot_map_x(&frame, &x_axis, hz);
+        double py = plot_map_y(&frame, &y_axis, (double)spectrum[i]);
+
+        //Clamp y to plot region (guards against FFT peaks that exceed 1.0)
+        if (py < frame.plot_y) py = frame.plot_y;
+        if (py > frame.plot_y + frame.plot_h) py = frame.plot_y + frame.plot_h;
+
+        cairo_line_to(cr, px, py);
+    }
+
+    //Extend to right plot edge (same y as last bin), so it touches the right side
+    const double last_y = plot_map_y(&frame, &y_axis, (double)spectrum[num_bins - 1]);
+    cairo_line_to(cr, frame.plot_x + frame.plot_w, last_y);
+
     cairo_stroke(cr);
     cairo_restore(cr);
 }
-
 
 /*--------------------------------------------------------
  * channel-specific drawing callbacks
