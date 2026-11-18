@@ -116,4 +116,12 @@ void audio_terminate(void);
  */
 int audio_get_input_channels(void);
 
+/**
+ * Re-enumerate audio devices from PortAudio.
+ * Preserves the current selection if the device still exists.
+ * Safe to call while a stream is running.
+ * @return 0 on success, -1 on error.
+ */
+int audio_rescan_devices(void);
+
 #endif //SAEC_STUDIO_AUDIO_H

@@ -63,8 +63,6 @@ add_executable(SAEC_Studio main.c
         src/dsp/analyzer.h
         src/gui/plot_axes.c
         src/gui/plot_axes.h
-        src/calibration.c
-        src/calibration.h
 )
 
 # Link the libs

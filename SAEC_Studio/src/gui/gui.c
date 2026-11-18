@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <portaudio.h>
 
 #include "dsp/analyzer.h"
 #include "dsp/welch.h"
@@ -30,9 +31,11 @@
  * With tick = 25 ms (40 Hz), we need ≥ 1103 frames; so we read 4096 (~_~) */
 #define GUI_MAX_READ_FRAMES  (2 * MEASURE_FFT_SIZE)   //4096
 
+
 //GUI state struct
 typedef struct {
     GtkApplication *app;
+    GtkStringList *device_model;
     GtkWidget *window;
     GtkWidget *waveform_area_ch1;
     GtkWidget *waveform_area_ch2;
@@ -49,6 +52,7 @@ typedef struct {
     GtkWidget *measure_button;
     GtkWidget *cancel_button;
     GtkWidget *start_stop_button;
+    GtkWidget *rescan_button; //Ronald wanted this so much
     GtkBuilder *builder;
     RingBuffer *rb;
 
@@ -81,6 +85,7 @@ typedef struct {
 } GUIState;
 
 
+static void populate_device_combo(GUIState *state);
 
 /*-------------------------------------------------
  * channel mode heplers
@@ -287,30 +292,57 @@ static void on_dialog_cancel(GtkButton *button, gpointer user_data)
 }
 
 //signal handler
-static void on_device_changed(GObject *object, GParamSpec *pspec, gpointer user_data)
-{
+static void on_device_changed(GObject *object, GParamSpec *pspec, gpointer user_data) {
     GUIState *state = user_data;
     const guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(object));
-    if (selected == GTK_INVALID_LIST_POSITION) return;
+
+    if (selected == GTK_INVALID_LIST_POSITION) {
+        return;
+    }
 
     const AudioDeviceInfo *info = audio_get_device_info(selected);
     if (info == NULL) return;
 
-    if (is_pulse_device(info->name)) {
-        gtk_label_set_text(GTK_LABEL(state->status_label),
-                          "ERROR: PulseAudio devices not supported. Select hardware device."); //cause problems (linux)
-        return;
-    }
+    int rc = audio_select_device(info->index);
 
-    if (audio_select_device(info->index) == 0) {
-        //Reset channel mode on device change
+    //Always sync GUI with reality! whether succeeded or not. Be honest to GUI
+    state->is_streaming = audio_is_running();
+    gtk_button_set_label(GTK_BUTTON(state->start_stop_button), state->is_streaming ? "Stop" : "Start");
+
+    if (rc == 0) {
         state->channel_mode = CHANNEL_MODE_MONO;
         apply_channel_mode(state);
         refresh_status(state);
     } else {
-        gtk_label_set_text(GTK_LABEL(state->status_label), "ERROR: Failed to switch device");
+        gtk_label_set_text(GTK_LABEL(state->status_label), "ERROR: Failed to switch device - reverted to previous");
     }
 }
+
+static void on_rescan_clicked(const GtkButton *button, gpointer user_data)
+{
+    (void)button;
+    GUIState *state = user_data;
+
+    const int old_count = audio_get_device_count();
+    const int rc = audio_rescan_devices();
+
+    if (rc != 0) {
+        gtk_label_set_text(GTK_LABEL(state->status_label), "ERROR: Device rescan failed - see terminal");
+        return;
+    }
+
+    const int new_count = audio_get_device_count();
+
+    populate_device_combo(state);
+
+    state->is_streaming = audio_is_running();
+    gtk_button_set_label(GTK_BUTTON(state->start_stop_button), state->is_streaming ? "Stop" : "Start");
+
+    char status[256];
+    snprintf(status, sizeof(status), "Rescan: %d -> %d device(s)  |  Current: %s  |  %s", old_count, new_count, audio_get_device_name(), state->is_streaming ? "Running" : "Stopped");
+    gtk_label_set_text(GTK_LABEL(state->status_label), status);
+}
+
 
 static void on_signal_type_changed(GObject *object, GParamSpec *pspec, gpointer user_data)
 {
@@ -321,32 +353,65 @@ static void on_signal_type_changed(GObject *object, GParamSpec *pspec, gpointer 
 //device combo box
 static void populate_device_combo(GUIState *state)
 {
-    GtkStringList *string_list = gtk_string_list_new(NULL);
+    //GtkStringList *string_list = gtk_string_list_new(NULL);
     const int num_devices = audio_get_device_count();
+    const char *current_name = audio_get_device_name();
+    int selected_idx = 0;
+
+    //Find current device in new list
+    for (int i = 0; i < num_devices; i++) {
+        const AudioDeviceInfo *info = audio_get_device_info(i);
+        if (info && current_name && strcmp(info->name, current_name) == 0) {
+            selected_idx = i;
+            break;
+        }
+    }
+
+    if (state->device_model == NULL) {
+        state->device_model = gtk_string_list_new(NULL);
+
+        //build list, pulse is alrerdy filtered in audio.c now
+        for (int i = 0; i < num_devices; i++) {
+            const AudioDeviceInfo *info = audio_get_device_info(i);
+            if (info) {
+                gtk_string_list_append(state->device_model, info->name);
+            }
+        }
+
+        //create new dropdown
+        GtkWidget *drop_down = gtk_drop_down_new(G_LIST_MODEL(state->device_model), NULL);
+
+        //Replace the old combo box with the new drop-down
+        //Get parent container and replace child
+        GtkWidget *parent = gtk_widget_get_parent(state->device_combo);
+        if (parent) {
+            gtk_box_remove(GTK_BOX(parent), state->device_combo);
+            gtk_box_append(GTK_BOX(parent), drop_down);
+            gtk_widget_set_hexpand(drop_down, TRUE);
+            state->device_combo = drop_down;
+        }
+        //set selection before connecting the signal
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(state->device_combo), selected_idx);
+
+        //now connect the signal
+        g_signal_connect(state->device_combo, "notify::selected", G_CALLBACK(on_device_changed), state);
+
+        return;
+    }
+
+    //mutate model in place, never destroy widget
+    g_signal_handlers_block_by_func(state->device_combo, G_CALLBACK(on_device_changed), state);
+    gtk_string_list_splice(state->device_model, 0, g_list_model_get_n_items(G_LIST_MODEL(state->device_model)), NULL);
 
     for (int i = 0; i < num_devices; i++) {
         const AudioDeviceInfo *info = audio_get_device_info(i);
-        if (info == NULL) continue;
-        if (is_pulse_device(info->name)) continue; // filter out PulseAudio (linux)
-        gtk_string_list_append(string_list, info->name);
+        if (info) {
+            gtk_string_list_append(state->device_model, info->name);
+        }
     }
 
-    GtkWidget *drop_down = gtk_drop_down_new(G_LIST_MODEL(string_list), NULL);
-    //Replace the old combo box with the new drop-down
-    //Get parent container and replace child
-    GtkWidget *parent = gtk_widget_get_parent(state->device_combo);
-    if (parent) {
-        gtk_box_remove(GTK_BOX(parent), state->device_combo);
-        gtk_box_append(GTK_BOX(parent), drop_down);
-        gtk_widget_set_hexpand(drop_down, TRUE);
-        state->device_combo = drop_down;
-        g_signal_connect(state->device_combo, "notify::selected",
-                         G_CALLBACK(on_device_changed), state);
-    }
-
-    //Select first item
-    gtk_drop_down_set_selected(GTK_DROP_DOWN(state->device_combo), 0);
-    g_object_unref(string_list);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(state->device_combo), selected_idx);
+    g_signal_handlers_unblock_by_func(state->device_combo, G_CALLBACK(on_device_changed), state);
 }
 
 
@@ -428,41 +493,18 @@ static void draw_waveform_common(cairo_t *cr, int width, int height, const float
     cairo_restore(cr);
 }
 
-static void draw_spectrum_common(cairo_t *cr, int width, int height, const float *spectrum, int num_bins, double r, double g, double b, float sample_rate) {
+static void draw_spectrum_common(cairo_t *cr, const int width, const int height, const float *spectrum, int num_bins, double r, double g, double b, float sample_rate) {
     cairo_set_source_rgb(cr, 0.08, 0.08, 0.10);
     cairo_paint(cr);
 
     PlotFrame frame;
-    plot_frame_init(&frame, width, height, 60, 10, 15, 40);
-
-    //Peak (skip DC bin 0)
-    float max_val = 1e-4f;
-    for (int i = 1; i < num_bins; i++)
-        if (spectrum[i] > max_val) {
-            max_val = spectrum[i];
-        }
-
-    //quantize Y max to 1-2-5 decade steps -> stable tick labels
-    const double exponent = floor(log10((double)max_val));
-    const double mantissa = (double)max_val / pow(10.0, exponent);
-    double nice_mantissa; // (~_~)
-
-    if (mantissa <= 1.0) {
-        nice_mantissa = 1.0;
-    } else if (mantissa <= 2.0) {
-        nice_mantissa = 2.0;
-    } else if (mantissa <= 5.0) {
-        nice_mantissa = 5.0;
-    }else {
-        nice_mantissa = 10.0;
-    }
-    const double nice_max = nice_mantissa * pow(10.0, exponent);
+    plot_frame_init(&frame, width, height, 65, 10, 15, 40);
 
     const double nyquist = (double)sample_rate * 0.5;
 
-    //log-frequency axis must have min > 0 to avoid NaN
+    //Fixed y-axis on log scale (1e-6 to 1.0) -> no jitter, covers 6 decades of audio range
     const AxisConfig x_axis = { .label = "Frequency", .unit = "Hz", .min_value = 20.0, .max_value = nyquist, .log_scale = 1, .num_ticks = 0 };
-    const AxisConfig y_axis = { .label = "Magnitude", .unit = "", .min_value = 0.0, .max_value = nice_max, .log_scale = 0, .num_ticks = 5 };
+    const AxisConfig y_axis = { .label = "Magnitude", .unit = "", .min_value = 1e-6, .max_value = 1.0, .log_scale = 1, .num_ticks = 0 };
 
     plot_draw_axes(cr, &frame, &x_axis, &y_axis);
 
@@ -473,26 +515,44 @@ static void draw_spectrum_common(cairo_t *cr, int width, int height, const float
     cairo_set_source_rgb(cr, r, g, b);
     cairo_set_line_width(cr, 1.5);
 
-    int started = 0;
+    //Find first bin whose frequency is >= x_axis.min_value (skip DC bin 0)
+    int first_bin = -1;
     for (int i = 1; i < num_bins; i++) {
         const double hz = (double)i * sample_rate / ((double)num_bins * 2.0);
-
-        if (hz < x_axis.min_value) {
-            continue;
-        }
-        const double px = plot_map_x(&frame, &x_axis, hz);
-        const double py = plot_map_y(&frame, &y_axis, (double)spectrum[i]);
-
-        if (!started) {
-            cairo_move_to(cr, px, py); started = 1;
-        }else {
-            cairo_line_to(cr, px, py);
+        if (hz >= x_axis.min_value) {
+            first_bin = i;
+            break;
         }
     }
+    if (first_bin < 0) {
+        cairo_restore(cr);
+        return;
+    }
+
+    //Seed the trace at the left plot edge (same y as first bin), so it touches the y-axis
+    const double first_y = plot_map_y(&frame, &y_axis, (double)spectrum[first_bin]);
+    cairo_move_to(cr, frame.plot_x, first_y);
+
+    //Draw the actual trace from first_bin to the last bin
+    for (int i = first_bin; i < num_bins; i++) {
+        const double hz = (double)i * sample_rate / ((double)num_bins * 2.0);
+        const double px = plot_map_x(&frame, &x_axis, hz);
+        double py = plot_map_y(&frame, &y_axis, (double)spectrum[i]);
+
+        //Clamp y to plot region (guards against FFT peaks that exceed 1.0)
+        if (py < frame.plot_y) py = frame.plot_y;
+        if (py > frame.plot_y + frame.plot_h) py = frame.plot_y + frame.plot_h;
+
+        cairo_line_to(cr, px, py);
+    }
+
+    //Extend to right plot edge (same y as last bin), so it touches the right side
+    const double last_y = plot_map_y(&frame, &y_axis, (double)spectrum[num_bins - 1]);
+    cairo_line_to(cr, frame.plot_x + frame.plot_w, last_y);
+
     cairo_stroke(cr);
     cairo_restore(cr);
 }
-
 
 /*--------------------------------------------------------
  * channel-specific drawing callbacks
@@ -921,6 +981,7 @@ static void setup_callbacks(GUIState *state) {
     //buttons
     g_signal_connect(state->start_stop_button, "toggled", G_CALLBACK(on_start_stop_toggled), state);
     g_signal_connect(state->measure_button, "clicked", G_CALLBACK(on_measure_clicked), state);
+    g_signal_connect(state->rescan_button, "clicked", G_CALLBACK(on_rescan_clicked), state);
 
     //window
     g_signal_connect(state->window, "close-request", G_CALLBACK(on_window_closed), state);
@@ -969,13 +1030,13 @@ static void app_activate(GtkApplication *app, const gpointer user_data)
     state->cancel_button = GTK_WIDGET(gtk_builder_get_object(builder, "dialog_cancel_button"));
     GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(builder, "signal_params_dialog"));
 
-    if (!state->window || !state->waveform_area_ch1 || !state->waveform_area_ch2 ||
-        !state->spectrum_area_ch1 || !state->spectrum_area_ch2 ||
-        !state->h12_area || !state->coherence_area ||
-        !state->waveform_col2 || !state->spectrum_col2 ||
-        !state->device_combo || !state->signal_type_combo ||
-        !state->start_stop_button || !state->measure_button || !state->status_label ||
-        !state->generate_button || !state->cancel_button || !dialog) {
+    //Rescan button
+    state->rescan_button = GTK_WIDGET(gtk_builder_get_object(builder, "rescan_button"));
+
+    if (!state->window || !state->waveform_area_ch1 || !state->waveform_area_ch2 || !state->spectrum_area_ch1 ||
+        !state->spectrum_area_ch2 || !state->h12_area || !state->coherence_area || !state->waveform_col2 || !state->spectrum_col2 ||
+        !state->device_combo || !state->signal_type_combo || !state->start_stop_button || !state->measure_button || !state->status_label ||
+        !state->generate_button || !state->cancel_button || !dialog || !state->rescan_button) {
         fprintf(stderr, "app_activate: Failed to get all widgets.\n");
         g_object_unref(builder);
         return;
@@ -992,6 +1053,8 @@ static void app_activate(GtkApplication *app, const gpointer user_data)
     g_signal_connect(state->generate_button, "clicked", G_CALLBACK(on_dialog_generate), state);
     g_signal_connect(state->cancel_button, "clicked", G_CALLBACK(on_dialog_cancel), state);
     gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(state->window));
+
+    state->device_model = NULL;
 
     //Populate combos
     populate_device_combo(state);

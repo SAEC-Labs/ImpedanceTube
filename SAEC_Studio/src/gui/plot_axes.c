@@ -21,21 +21,26 @@
 #define TICK_GAP         3.0
 #define TITLE_GAP        8.0
 
-
 static void format_tick(char *buf, size_t buflen, double v, int log_scale) {
-    if (log_scale && v >= 1000.0 && v < 1.0e6 && fabs(v - round(v)) < 0.01) {
+    const double av = fabs(v);
+
+    if (log_scale && av >= 1000.0 && av < 1.0e6 && fabs(v - round(v)) < 0.01) {
+        //kHz shorthand for mid band log labels
         snprintf(buf, buflen, "%.0fk", v / 1000.0);
-    } else if (fabs(v - round(v)) < 0.0005) {
-        snprintf(buf, buflen, "%.f", v);
-    }  else if (fabs(v) < 0.01 && v != 0.0) {
-        snprintf(buf, buflen, "%.1e", v);
-    } else if (fabs(v) < 1.0) {
-        snprintf(buf, buflen, "%.2f", v);
-    } else if (fabs(v) < 10.0) {
-        snprintf(buf, buflen, "%.1f", v);
-    } else {
-        snprintf(buf, buflen, "%.0f", v);
-    }
+        } else if (v != 0.0 && av < 0.01) {
+            //Tiny values
+            snprintf(buf, buflen, "%.1e", v);
+        } else if (av < 1.0) {
+            //0.01 - 0.99: 3 significant figures, no trailing zeros
+            snprintf(buf, buflen, "%.3g", v);
+        } else if (fabs(v - round(v)) < 0.0005) {
+            //Near-integer in the linear range
+            snprintf(buf, buflen, "%.0f", v);
+        } else if (av < 10.0) {
+            snprintf(buf, buflen, "%.1f", v);
+        } else {
+            snprintf(buf, buflen, "%.0f", v);
+        }
 }
 
 //collect tick positions for an axis into an array, returns countt
@@ -54,10 +59,11 @@ static int collect_ticks(const AxisConfig *axis, double *ticks, int max_ticks) {
         const double log_max = log10(axis->max_value);
         const int d_min = (int)floor(log_min);
         const int d_max = (int)floor(log_max);
-        static const int mult[3] = {1, 2, 5};
+
+        static const int mult[1] = {1}; //1 per decade
 
         for (int d = d_min; d <= d_max && n < max_ticks; d++) {
-            for (int m = 0; m < 3 && n < max_ticks; m++) {
+            for (int m = 0; m < 1 && n < max_ticks; m++) {
                 const double v = (double)mult[m] * pow(10.0, d);
                 if (v < axis->min_value) {
                     continue;

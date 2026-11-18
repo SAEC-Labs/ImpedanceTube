@@ -36,6 +36,13 @@
                                 <property name="hexpand">False</property>
                             </object>
                         </child>
+                        <child>
+                            <object class="GtkButton" id="rescan_button">
+                                <property name="label">Rescan</property>
+                                <property name="hexpand">False</property>
+                                <property name="tooltip-text">Rescan audio devices</property>
+                            </object>
+                        </child>
 
                         <!-- Device group: label + dropdown tightly bound -->
                         <child>
