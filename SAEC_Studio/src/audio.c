@@ -143,7 +143,7 @@ static int audio_callback(const void *input, void *output, unsigned long frameCo
  * Returns number of devices found.
  */
 static int enumerate_devices(void) {
-    int count = Pa_GetDeviceCount();
+    const int count = Pa_GetDeviceCount();
     if (count < 0) return 0;
 
     device_count = 0;
@@ -398,8 +398,48 @@ const AudioDeviceInfo* audio_get_device_info(int index) {
     return &device_list[index];
 }
 
+int audio_rescan_devices(void) {
+    //Use PortAudio's own health check - works regardless of internal flags
+    int pa_count = Pa_GetDeviceCount();
+    if (pa_count < 0) {
+        fprintf(stderr, "audio_rescan_devices: PortAudio error: %s\n", Pa_GetErrorText(pa_count));
+        return -1;
+    }
+
+    //Remember current device (by PaDeviceIndex, not list index)
+    int saved_pa = -1;
+    if (current_device_index >= 0 && current_device_index < device_count) {
+        saved_pa = device_list[current_device_index].index;
+    }
+
+    //Re-enumerate (this replaces device_list[]) (<_>)
+    int n = enumerate_devices();
+    if (n == 0) {
+        fprintf(stderr, "audio_rescan_devices: no usable devices found\n");
+        return -1;
+    }
+
+    //Try to preserve selection by PaDeviceIndex
+    current_device_index = -1;
+    if (saved_pa >= 0) {
+        for (int i = 0; i < device_count; i++) {
+            if (device_list[i].index == saved_pa) {
+                current_device_index = i;
+                break;
+            }
+        }
+    }
+    if (current_device_index < 0) {
+        current_device_index = find_default_device_index();
+        if (current_device_index < 0) current_device_index = 0;
+    }
+
+    printf("audio: rescanned - %d device(s), current = '%s'\n", device_count, device_list[current_device_index].name);
+    return 0;
+}
+
 int audio_select_device(int device_index) {
-    //find the index in our list
+    //new device in our list
     int new_list_index = -1;
     for (int i = 0; i < device_count; i++) {
         if (device_list[i].index == device_index) {
@@ -408,41 +448,56 @@ int audio_select_device(int device_index) {
         }
     }
     if (new_list_index < 0) {
-        fprintf(stderr, "audio_select_device: Device index %d not found.\n", device_index);
+        fprintf(stderr, "audio_select_device: device index %d not found\n", device_index);
         return -1;
     }
 
-    //if already selected do nothing
     if (new_list_index == current_device_index) {
         return 0;
     }
 
-    //always stop the stream first
-    if (is_running) {
-        audio_stop();
-    }
+    const int old_index   = current_device_index;
+    const int was_running = is_running;
 
-    //close old stream
+    //Stop and close the old stream
     if (stream) {
+        if (is_running) {
+            Pa_StopStream(stream);
+            is_running = 0;
+        }
         Pa_CloseStream(stream);
-        stream = NULL;
-
-        usleep(100000); //100ms delay to let ALSA (linux) or ASIO (windows) release the device
+        stream = NULL; //on failuer, GUI thinks its running (~_~)
     }
 
-    //update current device
+    //Try the new device
     current_device_index = new_list_index;
-
-    //reopen stream
     if (open_stream() != 0) {
-        fprintf(stderr, "audio_select_device: Failed to open stream with new device.\n");
+        fprintf(stderr, "audio: could not open new device, reverting\n"); //oh no!
+
+        //Revert to old device, old is gold (>_<)
+        current_device_index = old_index;
+        if (old_index >= 0 && open_stream() == 0) {
+            if (was_running && audio_start() != 0) {
+                fprintf(stderr, "audio: reverted but failed to restart stream\n");
+            }
+        } else {
+            fprintf(stderr, "audio: CRITICAL - could not reopen previous device!\n");
+        }
         return -1;
     }
 
-    //restart only  if it was running before
-    if (is_running) {
+    //New stream opened; restart if it was running
+    if (was_running) {
         if (audio_start() != 0) {
-            fprintf(stderr, "audio_select_device: Failed to restart stream.\n");
+            fprintf(stderr, "audio: new device opened but Pa_StartStream failed\n");
+
+            //Try to revert now!
+            Pa_CloseStream(stream);
+            stream = NULL;
+            current_device_index = old_index;
+            if (old_index >= 0 && open_stream() == 0 && was_running) {
+                audio_start();
+            }
             return -1;
         }
     }
