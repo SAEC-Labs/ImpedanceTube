@@ -347,13 +347,109 @@ int transmission_load_reference(const char *path) {
     return 0;
 }
 
+/*-------------------------------------------------------
+ * Compute Tp and TL
+ * --------------------------------------------------------*/
 
 int transmission_compute(const float *G11, const float *G22, const float *G12_real, const float *G12_imag, int sample_rate) {
     (void)G22;
 
+    if (!t_ctx.initialized || !t_ctx.has_reference) {
+        return -1;
+    }
+    if (!G11 || !G12_real || !G12_imag) {
+        return -1;
+    }
+    if (sample_rate <= 0) {
+        return -1;
+    }
+
+    t_ctx.sample_rate = sample_rate;
+    const int N = t_ctx.num_bins;
+    const double fs = sample_rate;
+    const double fft = 2.0 * (double)(N - 1);
+    const double c0 = t_ctx.c0;
+    const double L = t_ctx.thickness_m;
+
+    for (int i = 1; i < N; i++) {
+        //default = zero (invalid)
+        t_ctx.tp_re[i] = 0.0f;
+        t_ctx.tp_im[i] = 0.0f;
+        t_ctx.tp_mag_db[i] = TRANSMISSION_MAG_FLOOR_DB;
+        t_ctx.tl_db[i] = -TRANSMISSION_MAG_FLOOR_DB;
+
+        //skip bins with no valid reference
+        if (!t_ctx.h12_ref_valid[i]) {
+            continue;
+        }
+
+        const double g11 = G11[i];
+        if (g11 < (double)TRANSMISSION_EPS) {
+            continue;
+        }
+
+        //H_sample = G12 / G11
+        const double h_re = (double)G12_real[i] / g11;
+        const double h_im = (double)G12_imag[i] / g11;
+
+        //ratio = H_sample / H_ref
+        double r_re, r_im;
+        if (!complex_div(h_re, h_im, t_ctx.h12_ref_re[i], t_ctx.h12_ref_im[i], &r_re, &r_im)) {
+            continue;
+        }
+
+        //Phase factor exp(-j.k0.L)
+        const double f = (double)i * fs / fft;
+        const double k0 = 2.0 * M_PI *f / c0;
+        const double a = k0 * L; //phase angle
+        const double ca = cos(a);
+        const double sa = sin(a);
+
+        //Tp = (r_re + j.r_im) . (ca - j.sa)
+        const double tp_re_v = r_re * ca + r_im * sa;
+        const double tp_im_v = -r_re * sa + r_im * ca;
+
+        if (!isfinite(tp_re_v) || !isfinite(tp_im_v)) {
+            continue;
+        }
+
+        t_ctx.tp_re[i] = (float)tp_re_v;
+        t_ctx.tp_im[i] = (float)tp_im_v;
+
+        //Magnitude / TL
+        const double mag = sqrt(tp_re_v * tp_re_v + tp_im_v * tp_im_v);
+        if (mag < 1e-10) {
+            t_ctx.tp_mag_db[i] = TRANSMISSION_MAG_FLOOR_DB;
+            t_ctx.tl_db[i] = -TRANSMISSION_MAG_FLOOR_DB;
+        } else {
+            const double mag_db = 20.0 * log10(mag);
+            t_ctx.tp_mag_db[i] = (float)mag_db;
+            t_ctx.tl_db[i] = (float)(-mag_db);
+        }
+    }
+    return 0;
+}
+
+/* Assessors */
+
+const float *transmission_get_Tp_real(void) {
+    return t_ctx.tp_re;
+}
+const float *transmission_get_Tp_imag(void) {
+    return t_ctx.tp_im;
+}
+const float *transmission_get_Tp_mag_db(void) {
+    return t_ctx.tp_mag_db;
+}
+const float *transmission_get_TL_db(void) {
+    return t_ctx.tl_db;
 }
 
 
+/* future placeholders, return NULL until implemented */
+const float *transmission_get_phase_unwrapped(void) { return NULL; }
+const float *transmission_get_group_delay_us(void)  { return NULL; }
+const float *transmission_get_inferred_alpha(void)  { return NULL; }
 
 
 
