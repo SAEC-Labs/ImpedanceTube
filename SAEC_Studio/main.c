@@ -12,7 +12,7 @@
 #include "src/ring_buffer.h"
 #include "src/audio.h"
 #include "src/gui/gui.h"
-
+#include "transmission.h"
 
 //signal handler for nice termination with Ctrl+C
 
@@ -69,6 +69,8 @@ int main(int argc, char **argv) {
     //measure selftest
     //measure_selftest();
     //return 0; //exite after self test
+    //transmission_selftest();
+    //return 0;
 
     //Launch GUI: blocks until window is closed
     printf("Launching GUI...\n\n");

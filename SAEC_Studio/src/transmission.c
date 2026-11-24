@@ -11,7 +11,7 @@
 #include <errno.h>
 
 #ifndef M_PI2
-#define M_P2 3.14159265358979323846
+#define M_PI2 3.14159265358979323846
 #endif
 
 
@@ -35,8 +35,19 @@ typedef struct {
     float *tp_im;
     float *tp_mag_db;
     float *tl_db;
+    float *power_T;
+    float *downstream_level_db;
+    int *tl_valid;
 
+    //From capture
     TransmissionDiagnostics diag;
+
+    //Diagnostics from last compute over vlaid beans
+    int num_valid_tl;
+    int num_negative_tl;
+    double min_tl;
+    double max_tl;
+    double mean_tl;
 } TContext;
 
 static TContext t_ctx = {0};
@@ -86,7 +97,12 @@ int transmission_init(int num_bins) {
     t_ctx.tp_mag_db = (float*)calloc(num_bins, sizeof(float));
     t_ctx.tl_db = (float*)calloc(num_bins, sizeof(float));
 
-    if (!t_ctx.h12_ref_re || !t_ctx.h12_ref_im || !t_ctx.h12_ref_valid || !t_ctx.tp_re || !t_ctx.tp_im || !t_ctx.tp_mag_db || !t_ctx.tl_db) {
+    t_ctx.power_T = (float*)calloc(num_bins, sizeof(float));
+    t_ctx.downstream_level_db = (float*)calloc(num_bins, sizeof(float));
+    t_ctx.tl_valid = (int*)calloc(num_bins, sizeof(int));
+
+    if (!t_ctx.h12_ref_re || !t_ctx.h12_ref_im || !t_ctx.h12_ref_valid || !t_ctx.tp_re || !t_ctx.tp_im ||
+        !t_ctx.tp_mag_db || !t_ctx.tl_db || !t_ctx.power_T || !t_ctx.downstream_level_db || !t_ctx.tl_valid) {
         transmission_free();
         return -1;
     }
@@ -97,7 +113,7 @@ int transmission_init(int num_bins) {
     t_ctx.has_reference = 0;
     t_ctx.initialized = 1;
 
-    printf("transmission: initialized (%d bins, c0=%.1f m/s)\n", num_bins, t_ctx.c0);
+    printf("transmission: initialized (%d bins, c0=%.1f m/s, coh_thresh=%.2f)\n", num_bins, t_ctx.c0, (double)TRANSMISSION_COHERENCE_THRESHOLD);
     return 0;
 }
 
@@ -109,6 +125,9 @@ void transmission_free(void) {
     free(t_ctx.tp_im);
     free(t_ctx.tp_mag_db);
     free(t_ctx.tl_db);
+    free(t_ctx.power_T);
+    free(t_ctx.downstream_level_db);
+    free(t_ctx.tl_valid);
     memset(&t_ctx, 0, sizeof(t_ctx));
 }
 
@@ -125,7 +144,7 @@ void transmission_clear_reference(void) {
     printf("transmission: reference cleared\n");
 }
 
-
+//with coherence gating
 int transmission_capture_reference(const float *G11, const float *G22, const float *G12_real, const float *G12_imag, double thickness_m, int sample_rate) {
     if (!t_ctx.initialized) {
         return -1;
@@ -155,39 +174,39 @@ int transmission_capture_reference(const float *G11, const float *G22, const flo
     int coh_count = 0;
 
     for (int i = 1; i < t_ctx.num_bins; i++) {
-        const double g11 = (double)G11[i];
-        const double g22 = (double)G22[i];
-        const double s12r = (double)G12_real[i];
-        const double s12i = (double)G12_imag[i];
+        const double g11 = G11[i];
+        const double g22 = G22[i];
+        const double s12r = G12_real[i];
+        const double s12i = G12_imag[i];
 
-        //Coherence diagnostica
-        if (g11 > TRANSMISSION_EPS && g22 > TRANSMISSION_EPS) {
-            double coh = (s12r * s12r + s12i * s12i) / (g11 * g22);
-            if (coh > 1.0) {
-                coh = 1.0;
-            }
-            if (coh < 0.0) {
-                coh = 0.0;
-            }
-            if (isfinite(coh)) {
-                coh_sum += coh;
-                coh_count++;
-            }
-        }
-
-        //H_ref
-        if (g11 < TRANSMISSION_EPS) {
+        if (g11 < TRANSMISSION_EPS || g22 < TRANSMISSION_EPS) {
             continue;
         }
 
-        double h_re = s12r / g11;
-        double h_im = s12i / g11;
+        //Coherence diagnostica
+        double coh = (s12r * s12r + s12i * s12i) / (g11 * g22);
+        if (coh > 1.0) coh = 1.0;
+        if (coh < 0.0) coh = 0.0;
+        if (!isfinite(coh)) {
+            continue;
+        }
+        coh_sum += coh;
+        coh_count++;
+
+        //Coherence gate to reject noisy ref bins
+        if (coh < (double)TRANSMISSION_COHERENCE_THRESHOLD) {
+            continue;
+        }
+
+        //H_ref
+        const double h_re = s12r / g11;
+        const double h_im = s12i / g11;
 
         if (!isfinite(h_re) || !isfinite(h_im)) {
             continue;
         }
 
-        double mag = sqrt(h_re * h_re + h_im * h_im);
+        const double mag = sqrt(h_re * h_re + h_im * h_im);
         if (mag < 1e-8) {
             continue; //unusable ref, too small
         }
@@ -227,7 +246,7 @@ const TransmissionDiagnostics *transmission_get_diagnostics(void) {
  * Persistence with plain text key value
  */
 int transmission_save_reference(const char *path) {
-    if (!t_ctx.initialized || !t_ctx.has_reference || path) {
+    if (!t_ctx.initialized || !t_ctx.has_reference || !path) {
         return -1;
     }
 
@@ -348,7 +367,7 @@ int transmission_load_reference(const char *path) {
 }
 
 /*-------------------------------------------------------
- * Compute Tp and TL
+ * Compute Tp and TL like a good puter
  * --------------------------------------------------------*/
 
 int transmission_compute(const float *G11, const float *G22, const float *G12_real, const float *G12_imag, int sample_rate) {
@@ -371,12 +390,37 @@ int transmission_compute(const float *G11, const float *G22, const float *G12_re
     const double c0 = t_ctx.c0;
     const double L = t_ctx.thickness_m;
 
+    //Reset diagnostica accumulators
+    int valid_count = 0;
+    int negative_count = 0;
+    double tl_sum = 0.0;
+    double tl_min = 1e9;
+    double tl_max = -1e9;
+
     for (int i = 1; i < N; i++) {
         //default = zero (invalid)
         t_ctx.tp_re[i] = 0.0f;
         t_ctx.tp_im[i] = 0.0f;
         t_ctx.tp_mag_db[i] = TRANSMISSION_MAG_FLOOR_DB;
         t_ctx.tl_db[i] = -TRANSMISSION_MAG_FLOOR_DB;
+        t_ctx.power_T[i] = 0.0f;
+        t_ctx.downstream_level_db[i] = TRANSMISSION_MAG_FLOOR_DB;
+        t_ctx.tl_valid[i] = 0;
+
+        //DC
+        if (i == 0) {
+            continue;
+        }
+
+        //downstream level: always puted if G22 > 0 regardless of ref
+        const double g22 = G22[i];
+        if (g22 > TRANSMISSION_EPS && isfinite(g22)) {
+            double lvl = 10.0 * log10(g22);
+            if (lvl < (double)TRANSMISSION_MAG_FLOOR_DB) {
+                lvl = (double)TRANSMISSION_MAG_FLOOR_DB;
+            }
+            t_ctx.downstream_level_db[i] = (float)lvl;
+        }
 
         //skip bins with no valid reference
         if (!t_ctx.h12_ref_valid[i]) {
@@ -384,13 +428,30 @@ int transmission_compute(const float *G11, const float *G22, const float *G12_re
         }
 
         const double g11 = G11[i];
-        if (g11 < (double)TRANSMISSION_EPS) {
+        if (g11 < TRANSMISSION_EPS) {
             continue;
         }
 
+        //Sample gate
+        const double s12r = G12_real[i];
+        const double s12i = G12_imag[i];
+        if (g22 < TRANSMISSION_EPS) {
+            continue;
+        }
+        double coh = (s12r * s12r + s12i * s12i) / (g11 * g22);
+        if (coh > 1.0) coh = 1.0;
+        if (coh < 0.0) coh = 0.0;
+        if (!isfinite(coh)) {
+            continue;
+        }
+        if (coh < (double)TRANSMISSION_COHERENCE_THRESHOLD) {
+            continue;
+        }
+
+
         //H_sample = G12 / G11
-        const double h_re = (double)G12_real[i] / g11;
-        const double h_im = (double)G12_imag[i] / g11;
+        const double h_re = s12r / g11;
+        const double h_im =s12i / g11;
 
         //ratio = H_sample / H_ref
         double r_re, r_im;
@@ -400,7 +461,7 @@ int transmission_compute(const float *G11, const float *G22, const float *G12_re
 
         //Phase factor exp(-j.k0.L)
         const double f = (double)i * fs / fft;
-        const double k0 = 2.0 * M_PI *f / c0;
+        const double k0 = 2.0 * M_PI2 *f / c0;
         const double a = k0 * L; //phase angle
         const double ca = cos(a);
         const double sa = sin(a);
@@ -416,8 +477,11 @@ int transmission_compute(const float *G11, const float *G22, const float *G12_re
         t_ctx.tp_re[i] = (float)tp_re_v;
         t_ctx.tp_im[i] = (float)tp_im_v;
 
-        //Magnitude / TL
-        const double mag = sqrt(tp_re_v * tp_re_v + tp_im_v * tp_im_v);
+        //Magnitudes
+        const double mag_sq = tp_re_v * tp_re_v + tp_im_v * tp_im_v;
+        const double mag = sqrt(mag_sq);
+        t_ctx.power_T[i] = (float)mag_sq;
+
         if (mag < 1e-10) {
             t_ctx.tp_mag_db[i] = TRANSMISSION_MAG_FLOOR_DB;
             t_ctx.tl_db[i] = -TRANSMISSION_MAG_FLOOR_DB;
@@ -425,8 +489,31 @@ int transmission_compute(const float *G11, const float *G22, const float *G12_re
             const double mag_db = 20.0 * log10(mag);
             t_ctx.tp_mag_db[i] = (float)mag_db;
             t_ctx.tl_db[i] = (float)(-mag_db);
+
+            //Accumulate diagnostica
+            const double tl_val = -mag_db;
+            tl_sum += tl_val;
+            if (tl_val < tl_min) {
+                tl_min = tl_val;
+            }
+            if (tl_val > tl_max) {
+                tl_max = tl_val;
+            }
+            if (tl_val < 0.0) {
+                negative_count++;
+            }
         }
+        t_ctx.tl_valid[i] = 1;
+        valid_count++;
     }
+
+    //commit diagnostica
+    t_ctx.num_valid_tl = valid_count;
+    t_ctx.num_negative_tl = negative_count;
+    t_ctx.min_tl = (valid_count > 0) ? tl_min : 0.0;
+    t_ctx.max_tl = (valid_count > 0) ? tl_max : 0.0;
+    t_ctx.mean_tl = (valid_count > 0) ? tl_sum / (double)valid_count : 0.0;
+
     return 0;
 }
 
@@ -444,7 +531,31 @@ const float *transmission_get_Tp_mag_db(void) {
 const float *transmission_get_TL_db(void) {
     return t_ctx.tl_db;
 }
+const float *transmission_get_power_T(void) {
+    return t_ctx.power_T;
+}
+const float *transmission_get_downstream_level_db(void) {
+    return t_ctx.downstream_level_db;
+}
+const int *transmission_get_tl_valid(void) {
+    return t_ctx.tl_valid;
+}
 
+int transmission_get_num_valid_tl_bins(void) {
+    return t_ctx.num_valid_tl;
+}
+int transmission_get_num_negative_tl_bins(void) {
+    return t_ctx.num_negative_tl;
+}
+double transmission_get_min_tl_db(void) {
+    return t_ctx.min_tl;
+}
+double transmission_get_max_tl_db(void) {
+    return t_ctx.max_tl;
+}
+double transmission_get_mean_tl_db(void) {
+    return t_ctx.mean_tl;
+}
 
 /* future placeholders, return NULL until implemented */
 const float *transmission_get_phase_unwrapped(void) { return NULL; }
@@ -453,3 +564,6 @@ const float *transmission_get_inferred_alpha(void)  { return NULL; }
 
 
 
+/**
+ * Self test
+ */
