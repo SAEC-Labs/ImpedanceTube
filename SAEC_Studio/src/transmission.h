@@ -36,6 +36,8 @@
 //coherence gate, bins below this are marked invalid for TL
 #define TRANSMISSION_COHERENCE_THRESHOLD 0.80f
 
+#define TRANSMISSION_PHASE_SMOOTH_RADIUS 2 //+-2bins = 5bin moving avg
+
 typedef struct {
     int num_valid_bins;
     double mean_coherence;
@@ -86,10 +88,14 @@ double transmission_get_max_tl_db(void);
 double transmission_get_mean_tl_db(void);
 int transmission_get_num_negative_tl_bins(void);
 
-//some future placeholders, return NULL until implemented!!
-const float *transmission_get_phase_unwrapped(void);
-const float *transmission_get_group_delay_us(void);
+double transmission_get_mean_group_delay_us(void);
+double transmission_get_phase_span_rad(void);
+
+const float *transmission_get_phase_unwrapped(void); //radians
+const float *transmission_get_group_delay_us(void); //micrro seconds
 const float *transmission_get_inferred_alpha(void);
+
+
 
 //Metadata
 const TransmissionDiagnostics *transmission_get_diagnostics(void);

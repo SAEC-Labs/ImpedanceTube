@@ -39,6 +39,11 @@ typedef struct {
     float *downstream_level_db;
     int *tl_valid;
 
+    //phase + group delay buffers
+    float *phase_unwrapped; //radians
+    float *phase_smoothed; //radians, working buffer
+    float *group_delay_us; //micro s
+
     //From capture
     TransmissionDiagnostics diag;
 
@@ -48,6 +53,10 @@ typedef struct {
     double min_tl;
     double max_tl;
     double mean_tl;
+
+    //diagnostica stats
+    double mean_group_delay_us;
+    double phase_span_rad;
 } TContext;
 
 static TContext t_ctx = {0};
@@ -91,18 +100,22 @@ int transmission_init(int num_bins) {
     t_ctx.h12_ref_re = (float*)calloc(num_bins, sizeof(float));
     t_ctx.h12_ref_im = (float*)calloc(num_bins, sizeof(float));
     t_ctx.h12_ref_valid = (int*)calloc(num_bins, sizeof(int));
-
     t_ctx.tp_re = (float*)calloc(num_bins, sizeof(float));
     t_ctx.tp_im = (float*)calloc(num_bins, sizeof(float));
     t_ctx.tp_mag_db = (float*)calloc(num_bins, sizeof(float));
     t_ctx.tl_db = (float*)calloc(num_bins, sizeof(float));
-
     t_ctx.power_T = (float*)calloc(num_bins, sizeof(float));
     t_ctx.downstream_level_db = (float*)calloc(num_bins, sizeof(float));
     t_ctx.tl_valid = (int*)calloc(num_bins, sizeof(int));
 
+    //allocate group delay and phase buffers
+    t_ctx.phase_unwrapped = (float*)calloc(num_bins, sizeof(float));
+    t_ctx.phase_smoothed = (float*)calloc(num_bins, sizeof(float));
+    t_ctx.group_delay_us = (float*)calloc(num_bins, sizeof(float));
+
     if (!t_ctx.h12_ref_re || !t_ctx.h12_ref_im || !t_ctx.h12_ref_valid || !t_ctx.tp_re || !t_ctx.tp_im ||
-        !t_ctx.tp_mag_db || !t_ctx.tl_db || !t_ctx.power_T || !t_ctx.downstream_level_db || !t_ctx.tl_valid) {
+        !t_ctx.tp_mag_db || !t_ctx.tl_db || !t_ctx.power_T || !t_ctx.downstream_level_db || !t_ctx.tl_valid ||
+        !t_ctx.phase_unwrapped || !t_ctx.phase_smoothed || !t_ctx.group_delay_us) {
         transmission_free();
         return -1;
     }
@@ -113,7 +126,8 @@ int transmission_init(int num_bins) {
     t_ctx.has_reference = 0;
     t_ctx.initialized = 1;
 
-    printf("transmission: initialized (%d bins, c0=%.1f m/s, coh_thresh=%.2f)\n", num_bins, t_ctx.c0, (double)TRANSMISSION_COHERENCE_THRESHOLD);
+    printf("transmission: initialized (%d bins, c0=%.1f m/s, coh_thresh=%.2f, smooth_r=%d)\n", num_bins, t_ctx.c0, (double)TRANSMISSION_COHERENCE_THRESHOLD, TRANSMISSION_PHASE_SMOOTH_RADIUS);
+
     return 0;
 }
 
@@ -128,6 +142,9 @@ void transmission_free(void) {
     free(t_ctx.power_T);
     free(t_ctx.downstream_level_db);
     free(t_ctx.tl_valid);
+    free(t_ctx.phase_unwrapped);
+    free(t_ctx.phase_smoothed);
+    free(t_ctx.group_delay_us);
     memset(&t_ctx, 0, sizeof(t_ctx));
 }
 
@@ -365,6 +382,20 @@ int transmission_load_reference(const char *path) {
     printf("transmission: reference loaded from '%s' (%d entries, valid=%d/%d)\n", path, ref_count, t_ctx.diag.num_valid_bins, t_ctx.num_bins);
     return 0;
 }
+
+/**-----------------------------------------------------------------------
+ * Puter compute phase unwarp and group delay
+ * Assumes tp_re[], tp_im[], tl_valid[] are already populated
+ * by transmission_compute(). Putes:
+ *  - phase_unwrapped[]   (radians, sequential unwrap with carry forward)
+ *  - phase_smoothed[]    (5bin moving average, valid neighbors only)
+ *  - group_delay_us[]    (central difference, boundary fallback)
+ *-----------------------------------------------------------------------*/
+static void compute_phase_and_group_delay(void) {
+
+}
+
+
 
 /*-------------------------------------------------------
  * Compute Tp and TL like a good puter
