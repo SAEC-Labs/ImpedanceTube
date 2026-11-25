@@ -383,16 +383,160 @@ int transmission_load_reference(const char *path) {
     return 0;
 }
 
-/**-----------------------------------------------------------------------
+/**
  * Puter compute phase unwarp and group delay
  * Assumes tp_re[], tp_im[], tl_valid[] are already populated
  * by transmission_compute(). Putes:
  *  - phase_unwrapped[]   (radians, sequential unwrap with carry forward)
  *  - phase_smoothed[]    (5bin moving average, valid neighbors only)
  *  - group_delay_us[]    (central difference, boundary fallback)
- *-----------------------------------------------------------------------*/
+ *
+ */
 static void compute_phase_and_group_delay(void) {
+    const int N = t_ctx.num_bins;
 
+    //reset output buffers
+    for (int i = 0; i < N; i++) {
+        t_ctx.phase_unwrapped[i] = 0.0f;
+        t_ctx.phase_smoothed[i] = 0.0f;
+        t_ctx.group_delay_us[i] = 0.0f;
+    }
+
+    //1. find the first valid bean, seed unwrap
+    int first_valid = -1;
+    for (int i = 1; i < N; i++) {
+        if (t_ctx.tl_valid[i]) {
+            first_valid = i;
+            break;
+        }
+    }
+
+    if (first_valid < 0) {
+        t_ctx.mean_group_delay_us = 0.0;
+        t_ctx.phase_span_rad = 0.0;
+        return;
+    }
+
+    double prev_wrapped = atan2((double)t_ctx.tp_im[first_valid], (double)t_ctx.tp_re[first_valid]);
+    t_ctx.phase_unwrapped[first_valid] = (float)prev_wrapped;
+    double unwrapped_accum = prev_wrapped;
+    double phase_min = prev_wrapped;
+    double phase_max = prev_wrapped;
+
+    //2. Sequential unwrap with carry-forward over invalid bins
+    for (int i = first_valid + 1; i < N; i++) {
+        if (!t_ctx.tl_valid[i]) {
+            t_ctx.phase_unwrapped[i] = (float)unwrapped_accum;
+            continue;
+        }
+
+        const double cur_wrapped = atan2((double)t_ctx.tp_im[i], (double)t_ctx.tp_re[i]);
+        double delta = cur_wrapped - prev_wrapped;
+
+        while (delta > M_PI2) {
+            delta -= 2.0 * M_PI;
+        }
+        while (delta < -M_PI2) {
+            delta += 2.0 * M_PI;
+        }
+
+        unwrapped_accum += delta;
+        t_ctx.phase_unwrapped[i] = (float)unwrapped_accum;
+        prev_wrapped = cur_wrapped;
+
+        if (unwrapped_accum < phase_min) {
+            phase_min = unwrapped_accum;
+        }
+        if (unwrapped_accum > phase_max) {
+            phase_max = unwrapped_accum;
+        }
+    }
+
+    t_ctx.phase_span_rad = phase_max - phase_min;
+
+    //3. 5bin moving average smoothing, for valid neighbors only!!
+    for (int i = 0; i < N; i++) {
+        const int R = TRANSMISSION_PHASE_SMOOTH_RADIUS;
+        if (!t_ctx.tl_valid[i]) {
+            t_ctx.phase_smoothed[i] = t_ctx.phase_unwrapped[i];
+            continue;
+        }
+        int count = 0;
+        double sum = 0.0;
+        for (int j = i - R; j <= i + R; j++) {
+            if ( j < 0 || j >= N) {
+                continue;
+            }
+            if (!t_ctx.tl_valid[j]) {
+                continue;
+            }
+            sum += (double)t_ctx.phase_unwrapped[j];
+            count++;
+        }
+        t_ctx.phase_smoothed[i] = (count > 0) ? (float)(sum / (double)count) : t_ctx.phase_unwrapped[i];
+    }
+
+    /*4. group delay via central difference. If you wonder why use central difference,
+     *   it's becaise is 2nd order accurate, better than forward/backward. Don't ask more questions!!
+    */
+    const double fs = (double)t_ctx.sample_rate;
+    const double fft_size = 2.0 * (double)(N - 1);
+    const double df = fs / fft_size;
+
+    double gd_sum = 0.0;
+    double gd_count = 0;
+
+    for (int i = 1; i < N; i++) {
+        if (!t_ctx.tl_valid[i]) {
+            continue;
+        }
+        //nearest vlaid neighbors
+        int prev_v = -1, next_v = -1;
+        for (int j = i - 1; j >= 1; j--) {
+            if (t_ctx.tl_valid[j]) {
+                prev_v = j;
+                break;
+            }
+        }
+        for (int j = i + 1; j < N; j++) {
+            if (t_ctx.tl_valid[j]) {
+                next_v = j;
+                break;
+            }
+        }
+
+        double dphi, dbin;
+        if (prev_v >= 0 && next_v >= 0) {
+            dphi = (double)t_ctx.phase_smoothed[next_v] - (double)t_ctx.phase_smoothed[prev_v];
+            dbin = (double)(next_v - prev_v);
+        } else if (next_v >= 0) {
+            dphi = (double)t_ctx.phase_smoothed[next_v] - (double)t_ctx.phase_smoothed[i];
+            dbin = (double)(next_v - i);
+        } else if (prev_v >= 0) {
+            dphi = (double)t_ctx.phase_smoothed[i] - (double)t_ctx.phase_smoothed[prev_v];
+            dbin = (double)(i - prev_v);
+        } else {
+            continue; //funny
+        }
+
+        if (dbin < 1.0) {
+            continue;
+        }
+
+        //At this point I also don't know what I'm doing (~_~) it's the formula ?
+        const double df_step = dbin * df;
+        const double tau_s = -(dphi / df_step) / (2.0 * M_PI);
+        const double tau_us = tau_s * 1e6; //micro s
+
+        if (!isfinite(tau_us)) {
+            continue;
+        }
+
+        t_ctx.group_delay_us[i] = (float)tau_us;
+        gd_sum += tau_s;
+        gd_count++;
+    }
+    t_ctx.mean_group_delay_us = (gd_count > 0) ? gd_sum / (double)gd_count : 0.0;
 }
 
 
@@ -545,6 +689,9 @@ int transmission_compute(const float *G11, const float *G22, const float *G12_re
     t_ctx.max_tl = (valid_count > 0) ? tl_max : 0.0;
     t_ctx.mean_tl = (valid_count > 0) ? tl_sum / (double)valid_count : 0.0;
 
+    //compute phase and group delay from the freshly filled Tp now
+    compute_phase_and_group_delay();
+
     return 0;
 }
 
@@ -571,6 +718,17 @@ const float *transmission_get_downstream_level_db(void) {
 const int *transmission_get_tl_valid(void) {
     return t_ctx.tl_valid;
 }
+const float *transmission_get_phase_unwrapped(void) {
+    return t_ctx.phase_unwrapped;
+}
+const float *transmission_get_group_delay_us(void) {
+    return t_ctx.group_delay_us;
+}
+
+//still NULL
+const float *transmission_get_inferred_alpha(void) {
+    return NULL;
+}
 
 int transmission_get_num_valid_tl_bins(void) {
     return t_ctx.num_valid_tl;
@@ -587,11 +745,12 @@ double transmission_get_max_tl_db(void) {
 double transmission_get_mean_tl_db(void) {
     return t_ctx.mean_tl;
 }
-
-/* future placeholders, return NULL until implemented */
-const float *transmission_get_phase_unwrapped(void) { return NULL; }
-const float *transmission_get_group_delay_us(void)  { return NULL; }
-const float *transmission_get_inferred_alpha(void)  { return NULL; }
+double transmission_get_mean_group_delay_us(void) {
+    return t_ctx.mean_group_delay_us;
+}
+double transmission_get_phase_span_rad(void) {
+    return t_ctx.phase_span_rad;
+}
 
 
 
